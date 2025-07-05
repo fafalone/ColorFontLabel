@@ -65,7 +65,7 @@ For commercial use, contact me at fafalone@gmail.com.
                                         ChrW$(&HDC00& + (CharCode And (POW10 - 1)))
     End Function
 
-    ColorFontLabel1.Text = ChrW2(&HD83C) & " ColorFontLabel"
+    ColorFontLabel1.Text = ChrW2(&H1F308) & " ColorFontLabel"
 ```
 
 - To specify a gradient, call TextLinearGradientSet or TextRadialGradientSet to configure and enable it. The first two arguments must be the first member of an array; see the test project for example. Colors are standard OLE_COLOR values. The positions represent percentages where it changes, e.g. for an evenly spaced 3-color gradient, you'd use 0.0, 0.5, 1.0. Call TextGradientClear to return to a solid color. The coordinate arguments directly track the Direct2D parameters, for more info:
