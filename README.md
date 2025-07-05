@@ -1,7 +1,8 @@
 # 🌈 ColorFontLabel
 Enhanced Label UserControl/ActiveX Control Supporting Color Fonts (i.e. color emojis)
 
-![image](https://github.com/user-attachments/assets/20f47c40-fc97-4c82-9f68-e3c0e72cb4ed) ![image](https://github.com/user-attachments/assets/f8eb4b13-5a0a-4ff6-8969-b4ab5b2af9d2)
+![image](https://github.com/user-attachments/assets/20f47c40-fc97-4c82-9f68-e3c0e72cb4ed) ![image](https://github.com/user-attachments/assets/1b239fa8-4d44-44eb-9e56-cb1737d2091c)
+
 
 
 ---
