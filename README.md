@@ -11,6 +11,13 @@ Enhanced Label UserControl/ActiveX Control Supporting Color Fonts (i.e. color em
 Creative Commons Attribution-NonCommercial 4.0 International license.
 For commercial use, contact me at fafalone@gmail.com. 
 
+**Updates**
+- v1.1 (05 Jul 2025) 
+    - Now using quicker/more stable DC render target. Thanks to Wayne Phillips for
+        this contribution. This works better in the IDE and faster at runtime.
+    - (Bug fix) Size/position badly broken when DPI awareness enabled.
+
+There's some size issues on high DPI displays, but since there's a lot fewer problems otherwise and I have to go for now, I'm posting this and leaving the old version available as ucColorFontLabel10.twinproj,
 
 ### Features
 
