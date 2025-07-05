@@ -1,0 +1,967 @@
+[Description("Color Font Label Control v1.0")]
+[FormDesignerId("95B0B2E5-5DAB-4961-B40E-FB8A132A8600")]
+[ClassId("B3F85F82-99CE-450A-818B-05A042F4F99F")]
+[InterfaceId("B4FCE572-7E21-4A0E-870F-8DA559DF3871")]
+[EventInterfaceId("A886B18F-EBA8-4863-8252-E9B55BA7CAA9")]
+[COMControl]
+Class ucColorFontLabel
+Option Explicit
+Private Const dbg_PrintToImmediate As Boolean = True 'This control has very extensive debug information, you may not want
+                                                      'to see that in your IDE.
+Private Const dbg_IncludeDate As Boolean = True 'Prefix all Debug output with the date and time, [yyyy-mm-dd Hh:Mm:Ss]
+Private Const dbg_IncludeName As Boolean = False 'Include Ambient.Name
+Private Const dbg_dtFormat As String = "yyyy-mm-dd Hh:nn:Ss"
+Private Const dbg_MinLevel As Long = 0&   'Only log to immediate/file messages >= this level
+
+'*********************************************************************************************
+'Color Font Label Control v1.0
+'by Jon Johnson
+'(c) 2025, Details: LICENSE.md: Licensed for non-commercial use only under the
+'Creative Commons Attribution-NonCommercial 4.0 International license.
+'For commercial use, contact me at fafalone@gmail.com.
+'
+'
+'This is a basic Label control except it uses Direct2D/DirectWrite to support
+'Color Fonts, most typically used for colorized emojis.
+'It has enhanced features over a VB6 label that a tB Label has, such as a 
+'Word Wrap option and Angle option. In addition, because you may not want to
+'apply them to emojis, this control provides options to set the common text 
+'effects to only apply to a certain range:
+' - BoldRange, ItalicizeRange, UnderlineRange, StrikethruRange, and StretchRange.
+'    The bEnable argument for those methods indicates that **if active**, the 
+'    alternate range supplied should be used, e.g. the Font underline property must
+'    be set in addition to passing bEnabled=True. This is so it can be toggled 
+'    without changing the font every time.
+'
+' **Additional notes and features**
+' - twinBASIC fully supports text in the editor, so you can set the text through
+'    the Properties in design mode or at runtime just by using the string. If you
+'    use this as an ActiveX control in VB6 or VBA, note that you'll need to use
+'    an alternative ChrW implementation and add emojis with that:
+/*    
+    Public Function ChrW2(ByVal CharCode As Long) As String
+    Const POW10 As Long = 2 ^ 10
+    If CharCode <= &HFFFF& Then ChrW2 = ChrW$(CharCode) Else _
+                                ChrW2 = ChrW$(&HD800& + (CharCode And &HFFFF&) \ POW10) & _
+                                        ChrW$(&HDC00& + (CharCode And (POW10 - 1)))
+    End Function
+
+    ColorFontLabel1.Text = ChrW2(&H1F308) & " ColorFontLabel"
+*/
+'
+' - Instead of the solid ForeColor for text color, you can specify a gradient.
+'    Call TextLinearGradientSet or TextRadialGradientSet to configure and enable it. 
+'    The first two arguments must be the first member of an array. Colors are standard 
+'    OLE_COLOR values. The positions represent percentages where it changes, e.g. for
+'    an evenly spaced 3-color gradient, you'd use 0.0, 0.5, 1.0.
+'    Call TextGradientClear to return to a solid color.
+'    The coordinate arguments directly track the Direct2D parameters, for more info:
+'     https://learn.microsoft.com/en-us/windows/win32/api/d2d1/ns-d2d1-d2d1_linear_gradient_brush_properties
+'     https://learn.microsoft.com/en-us/windows/win32/api/d2d1/ns-d2d1-d2d1_radial_gradient_brush_properties
+'
+' - This control supports DragDrag from other applications, and shows the nice
+'    drag images like Explorer. In exchange for that, it doesn't use the normal drag
+'    drop events and you'll have to work with the raw IDataObject.
+'
+' - Instead of TextAngle, you can specify a custom transform matrix via 
+'    SetCustomTransformMatrix. Cannot combine with TextAngle. If both are active,
+'    TextAngle is ignored.
+'
+' **Known Issues**
+' - There's a bug with twinBASIC IDE where, most of the time but not always, only a 
+'    black box is displayed in Design Mode.
+' - Alignment besides left align may interact poorly with TextAngle values besides 0.
+' - twinBASIC will display continuable exception errors while running from IDE.
+'
+'
+' **Requirements**
+'- Color Font support is only available in Windows 8+. This control should work
+' in Windows 7 but everything would be black and white. XP and earlier are not
+' supported in any way.
+'- When used as source, the package Windows Development Library for twinBASIC 
+'  (WinDevLib), version 9.1.566 or higher, is required.
+'
+' **Changelog**
+'
+'- v1.0 (xx Jul 2025) - Initial release.
+'
+'
+'*********************************************************************************************
+
+#Region "Declarations"
+Implements IDropTarget
+Private pDTH As DragDropHelper
+Private mDD As Boolean
+Private Const mDefDD As Boolean = False
+
+[DefaultDesignerEvent]
+Public Event Click()
+Public Event DblClick()
+Public Event MouseDown(Button As Integer, Shift As Integer, X As Single, Y As Single)
+Public Event MouseMove(Button As Integer, Shift As Integer, X As Single, Y As Single)
+Public Event MouseUp(Button As Integer, Shift As Integer, X As Single, Y As Single)
+Public Event MouseWheel(ByVal Delta As Integer, ByVal Horizontal As Boolean)
+
+Public Event DragEnterOLE(ByVal dataObject As IDataObject, ByVal grfKeyState As Long, pt As POINT, effect As Long)
+Public Event DragOverOLE(ByVal grfKeyState As Long, pt As POINT, effect As Long)
+Public Event DragLeaveOLE()
+Public Event DragDropOLE(ByVal dataObject As IDataObject, ByVal grfKeyState As Long, pt As POINT, effect As Long)
+
+
+Private DWriteFactory As IDWriteFactory
+Private Direct2dFactory As ID2D1Factory
+Private RenderTarget As ID2D1HwndRenderTarget
+Private TextBrush As ID2D1SolidColorBrush
+Private TextGradientBrush As ID2D1LinearGradientBrush
+Private TextGradientBrushR As ID2D1RadialGradientBrush
+Private GradStops As ID2D1GradientStopCollection
+
+Private WithEvents PropFont As StdFont
+Private mIFMain As IFont
+Private m_FontScaleCXY As Boolean
+Private Const m_def_FontScaleCXY As Boolean = True
+Private m_ScaleX As Single, m_ScaleY As Single
+Private clrBack As stdole.OLE_COLOR
+Private clrFore As stdole.OLE_COLOR
+Private mGradEnable As Integer '0=disable 1=linear 2=radial
+
+Private mCustMX As D2D1_MATRIX_3X2_F
+Private mUseCustMX As Boolean
+
+Private mText As String
+Private Const mDefText As String = "🌈 ColorFontLabel"
+
+Private mLocale As String
+Private Const mDefLocale As String = "en-US"
+
+Public Enum ColorFontLabelWordWrap
+    'Maps to DWRITE_WORD_WRAPPING
+    CFLWW_Wrap 'Words are broken across lines to avoid text overflowing the layout box.
+    CFLWW_NoWrap 'Words are kept within the same line even when it overflows the layout box.
+    CFLWW_EmergencyBreak 'Words are broken across lines to avoid text overflowing the layout box.
+                         ' Emergency wrapping occurs if the word is larger than the maximum width.
+    CFLWW_WholeWord 'Only wrap whole words, never breaking words (emergency wrapping) when the
+                    ' layout width is too small for even a single word.
+    CFLWW_Character 'Wrap between any valid characters clusters.
+End Enum
+Private mWrap As ColorFontLabelWordWrap
+Private Const mDefWrap As Long = CFLWW_NoWrap
+
+Public Enum ColorFontLabelTextAlign
+    'Maps to DWRITE_TEXT_ALIGNMENT
+    CFLTA_AlignLeft
+    CFLTA_AlignRight
+    CFLTA_AlignCenter
+    CFLTA_AlignJustified
+End Enum
+Private nAlign As ColorFontLabelTextAlign
+Private Const nDefAlign As Long = CFLTA_AlignLeft
+
+Public Enum ColorFontLabelTextStretch
+    'Maps to DWRITE_FONT_STRETCH
+    CFLTS_None
+    CFLTS_UltraCondensed
+    CFLTS_ExtraCondensed
+    CFLTS_Condensed
+    CFLTS_SemiCondensed
+    CFLTS_Normal
+    CFLTS_Medium
+    CFLTS_SemiExpanded
+    CFLTS_ExtraExpanded
+    CFLTS_UltraExpanded
+End Enum
+Private mStretch As ColorFontLabelTextStretch
+Private Const mDefStretch As Long = CFLTS_Normal
+
+Public Enum ColorFontLabelTextAliasing
+    'Maps to D2D1_TEXT_ANTIALIAS_MODE
+    CFLTA_Default
+    CFLTA_ClearType
+    CFLTA_Grayscale
+    CFLTA_Aliased
+End Enum
+Private mAlias As ColorFontLabelTextAliasing
+Private Const mDefAlias As Long = CFLTA_Default
+
+Private mLineSpacing As Single
+Private Const mDefLineSpacing As Single = 0
+Private mSpaceType As DWRITE_LINE_SPACING_METHOD
+
+Private mAngle As Long
+Private Const mDefAngle As Long = 0 'degrees
+
+Private mRTL As Boolean
+Private Const mDefRTL As Boolean = False
+
+Private mULRange As DWRITE_TEXT_RANGE
+Private mUseULR As Boolean
+
+Private mBRange As DWRITE_TEXT_RANGE
+Private mUseBR As Boolean
+
+Private mSTRange As DWRITE_TEXT_RANGE
+Private mUseSTR As Boolean
+
+Private mIRange As DWRITE_TEXT_RANGE
+Private mUseIR As Boolean
+
+Private mSRange As DWRITE_TEXT_RANGE
+Private mUseSR As Boolean
+
+Private mBorder As ControlBorderStyleConstants
+Private Const mDefBorder As Long = vbFixedSingleBorder
+
+#End Region
+Private Sub DebugAppend(ByVal sMsg As String, Optional ilvl As Long = 0)
+If ilvl < dbg_MinLevel Then Exit Sub
+Dim sOut As String
+If dbg_IncludeDate Then sOut = "[" & Format$(Now, dbg_dtFormat) & "] "
+If dbg_IncludeName Then sOut = sOut & Ambient.name & ": "
+sOut = sOut & sMsg
+#If TWINBASIC_BUILD_TYPE = "ActiveX Control" Then
+Debug.TracePrint sMsg
+#Else
+If dbg_PrintToImmediate Then
+    Debug.Print sOut
+End If
+#End If
+'If dbg_RaiseEvent = True Then RaiseEvent zDebugMessage(sOut, ilvl)
+
+End Sub
+
+#Region "Events"
+Private Sub UserControl_Initialize() Handles UserControl.Initialize
+    Dim hDC As LongPtr
+    hDC = GetDC(0&)
+    m_ScaleX = GetDeviceCaps(hDC, LOGPIXELSX) / 96
+    DebugAppend "dpix=" & GetDeviceCaps(hDC, LOGPIXELSX) / 96
+    m_ScaleY = GetDeviceCaps(hDC, LOGPIXELSY) / 96
+    ReleaseDC 0&, hDC
+End Sub
+Private Sub UserControl_Show() Handles UserControl.Show
+    If CreateDeviceIndependentResources = S_OK Then
+        Subclass2 UserControl.hWnd, AddressOf ucWndProc, UserControl.hWnd
+    End If
+    If Ambient.UserMode Then
+        If mDD Then
+            Set pDTH = New DragDropHelper
+            RegisterDragDrop(UserControl.hWnd, Me)
+        End If
+    End If
+End Sub
+Private Sub UserControl_Terminate() Handles UserControl.Terminate
+    UnSubclass2 UserControl.hWnd, AddressOf ucWndProc, UserControl.hWnd
+    Set TextGradientBrush = Nothing
+    Set GradStops = Nothing
+    Set Direct2dFactory = Nothing
+    Set DWriteFactory = Nothing
+    Set RenderTarget = Nothing
+    Set pDTH = Nothing
+End Sub
+
+
+Private Sub UserControl_InitProperties() Handles UserControl.InitProperties
+    Set PropFont = Ambient.Font
+    clrBack = UserControl.BackColor
+    clrFore = UserControl.ForeColor
+    mText = mDefText
+    mLocale = mDefLocale
+    nAlign = nDefAlign
+    mWrap = mDefWrap
+    mAngle = mDefAngle
+    mRTL = mDefRTL
+    mStretch = mDefStretch
+    mLineSpacing = mDefLineSpacing
+    mDD = mDefDD
+    mAlias = mDefAlias
+    mBorder = mDefBorder
+End Sub
+
+Private Sub UserControl_ReadProperties(PropBag As PropertyBag) Handles UserControl.ReadProperties
+    Set PropFont = PropBag.ReadProperty("Font", Ambient.Font)
+    clrBack = PropBag.ReadProperty("BackColor", UserControl.BackColor)
+    clrFore = PropBag.ReadProperty("ForeColor", UserControl.ForeColor)
+    mText = PropBag.ReadProperty("Caption", mDefText)
+    mLocale = PropBag.ReadProperty("Locale", mDefLocale)
+    nAlign = PropBag.ReadProperty("Alignment", nDefAlign)
+    mWrap = PropBag.ReadProperty("WordWrap", mDefWrap)
+    mAngle = PropBag.ReadProperty("Angle", mDefAngle)
+    mRTL = PropBag.ReadProperty("RightToLeft", mDefRTL)
+    mStretch = PropBag.ReadProperty("Stretch", mDefStretch)
+    mLineSpacing = PropBag.ReadProperty("LineSpacing", mDefLineSpacing)
+    mDD = PropBag.ReadProperty("AllowDragDrop", mDefDD)
+    mAlias = PropBag.ReadProperty("Antialiasing", mDefAlias)
+    mBorder = PropBag.ReadProperty("BorderStyle", mDefBorder)
+End Sub
+
+Private Sub UserControl_WriteProperties(PropBag As PropertyBag) Handles UserControl.WriteProperties
+    PropBag.WriteProperty "Font", PropFont, Ambient.Font
+    PropBag.WriteProperty "BackColor", clrBack, UserControl.BackColor
+    PropBag.WriteProperty "ForeColor", clrFore, UserControl.ForeColor
+    PropBag.WriteProperty "Caption", mText, mDefText
+    PropBag.WriteProperty "Locale", mLocale, mDefLocale
+    PropBag.WriteProperty "Alignment", nAlign, nDefAlign
+    PropBag.WriteProperty "WordWrap", mWrap, mDefWrap
+    PropBag.WriteProperty "Angle", mAngle, mDefAngle
+    PropBag.WriteProperty "RightToLeft", mRTL, mDefRTL
+    PropBag.WriteProperty "Stretch", mStretch, mDefStretch
+    PropBag.WriteProperty "LineSpacing", mLineSpacing, mDefLineSpacing
+    PropBag.WriteProperty "AllowDragDrop", mDD, mDefDD
+    PropBag.WriteProperty "Antialiasing", mAlias, mDefAlias
+    PropBag.WriteProperty "BorderStyle", mBorder, mDefBorder
+End Sub
+
+Private Sub UserControl_Click() Handles UserControl.Click
+    RaiseEvent Click()
+End Sub
+
+Private Sub UserControl_DblClick() Handles UserControl.DblClick
+    RaiseEvent DblClick()
+End Sub
+
+Private Sub UserControl_MouseDown(Button As Integer, Shift As Integer, X As Single, Y As Single) Handles UserControl.MouseDown
+    RaiseEvent MouseDown(Button, Shift, X, Y)
+End Sub
+
+Private Sub UserControl_MouseMove(Button As Integer, Shift As Integer, X As Single, Y As Single) Handles UserControl.MouseMove
+    RaiseEvent MouseMove(Button, Shift, X, Y)
+End Sub
+
+Private Sub UserControl_MouseUp(Button As Integer, Shift As Integer, X As Single, Y As Single) Handles UserControl.MouseUp
+    RaiseEvent MouseUp(Button, Shift, X, Y)
+End Sub
+
+Private Sub UserControl_MouseWheel(ByVal Delta As Integer, ByVal Horizontal As Boolean) Handles UserControl.MouseWheel
+    RaiseEvent MouseWheel(Delta, Horizontal)
+End Sub
+
+Private Sub IDropTarget_DragEnter(ByVal pDataObject As IDataObject, ByVal grfKeyState As KeyStateMouse, ByVal pt As LongLong, pdwEffect As DROPEFFECTS) Implements IDropTarget.DragEnter
+    Dim ptt As POINT
+    CopyMemory ptt, pt, LenB(ptt)
+    RaiseEvent DragEnterOLE(pDataObject, grfKeyState, ptt, pdwEffect)
+    pDTH.DragEnter UserControl.hWnd, pDataObject, ptt, pdwEffect
+End Sub
+
+Private Sub IDropTarget_DragLeave() Implements IDropTarget.DragLeave
+    RaiseEvent DragLeaveOLE()
+    pDTH.DragLeave()
+End Sub
+
+Private Sub IDropTarget_DragOver(ByVal grfKeyState As KeyStateMouse, ByVal pt As LongLong, pdwEffect As DROPEFFECTS) Implements IDropTarget.DragOver
+    Dim ptt As POINT
+    CopyMemory ptt, pt, LenB(ptt)
+    RaiseEvent DragOverOLE(grfKeyState, ptt, pdwEffect)
+    pDTH.DragOver ptt, pdwEffect
+    Err.ReturnHResult = S_OK
+End Sub
+
+Private Sub IDropTarget_Drop(ByVal pDataObj As IDataObject, ByVal grfKeyState As KeyStateMouse, ByVal pt As LongLong, pdwEffect As DROPEFFECTS) Implements IDropTarget.Drop
+    Dim ptt As POINT
+    CopyMemory ptt, pt, LenB(ptt)
+    RaiseEvent DragDropOLE(pDataObj, grfKeyState, ptt, pdwEffect)
+    pDTH.Drop pDataObj, ptt, pdwEffect
+End Sub
+
+#End Region
+
+#Region "Properties"
+Public Property Get BorderStyle() As Boolean: Return mBorder: End Property
+[Description("Sets the bordr style of the control.")]
+Public Property Let BorderStyle(ByVal value As Boolean)
+    If mBorder <> value Then
+        mBorder = value
+        UserControl.BorderStyle = mBorder
+    End If
+End Property
+
+Public Property Get AllowDragDrop() As Boolean: Return mDD: End Property
+[Description("Allow OLE Drag Drop from other applications.")]
+Public Property Let AllowDragDrop(ByVal bEnable As Boolean)
+    If mDD <> bEnable Then
+        mDD = bEnable
+        If mDD Then
+            Set pDTH = New DragDropHelper
+            RegisterDragDrop(UserControl.hWnd, Me)
+        Else
+            If RegisterDragDrop(UserControl.hWnd, Me) = DRAGDROP_E_ALREADYREGISTERED Then
+                Set pDTH = Nothing
+                RevokeDragDrop(UserControl.hWnd)
+            End If
+        End If
+    End If
+End Property
+
+Public Property Get Caption() As String: Return mText: End Property
+[Description("Sets the text of the label.")]
+Public Property Let Caption(ByVal sText As String)
+    mText = sText
+    OnRender()
+End Property
+
+Public Property Get Locale() As String: Return mLocale: End Property
+[Description("Sets the locale for the language code page to use.")]
+Public Property Let Locale(ByVal sLocale As String)
+    mLocale = sLocale
+    OnRender()
+End Property
+
+Public Property Get Alignment() As ColorFontLabelTextAlign: Return nAlign: End Property
+[Description("Sets the alignment for individual lines of text.")]
+Public Property Let Alignment(ByVal value As ColorFontLabelTextAlign)
+    nAlign = value
+    OnRender()
+End Property
+Public Property Get WordWrap() As ColorFontLabelWordWrap: Return mWrap: End Property
+[Description("Sets the rule for breaking a single line of text into multiple lines when it exceeds control width.")]
+Public Property Let WordWrap(ByVal value As ColorFontLabelWordWrap)
+    mWrap = value
+    OnRender()
+End Property
+
+Public Property Get Antialiasing() As ColorFontLabelTextAliasing: Return mAlias: End Property
+[Description("Sets the text antialiasing mode.")]
+Public Property Let Antialiasing(ByVal value As ColorFontLabelTextAliasing)
+    mAlias = value
+    OnRender()
+End Property
+
+
+Public Property Get LineSpacing() As Single: Return mLineSpacing: End Property
+[Description("Sets the spacing between lines of text.")]
+Public Property Let LineSpacing(ByVal value As Single)
+    mLineSpacing = value
+    OnRender()
+End Property
+
+Public Property Get Stretch() As ColorFontLabelTextStretch: Return mStretch: End Property
+[Description("Sets whether the text spacing is condensed/expanded.")]
+Public Property Let Stretch(ByVal value As ColorFontLabelTextStretch)
+    mStretch = value
+    OnRender()
+End Property
+
+Public Property Get TextAngle() As Long: Return mAngle: End Property
+[Description("Sets the angle of the text. Must be > 0. Text will be centered in container instead of originating top left.")]
+Public Property Let TextAngle(ByVal value As Long)
+    mAngle = value
+    If mAngle < 0 Then mAngle = 360 - mAngle 'correct for rational negative angles
+    OnRender()
+End Property
+
+[Description("Set a custom transform matrix. Cannot combine with TextAngle. If both are active, TextAngle is ignored.")]
+Public Sub SetCustomTransformMatrix(ByVal m11 As Single, _
+                                    ByVal m12 As Single, _
+                                    ByVal m21 As Single, _
+                                    ByVal m22 As Single, _
+                                    ByVal m31 As Single, _
+                                    ByVal m32 As Single)
+    mUseCustMX = True
+    With mCustMX
+        .m_11 = m11: .m_12 = m12
+        .m_21 = m11: .m_22 = m12
+        .m_31 = m11: .m_32 = m12
+    End With
+End Sub
+[Description("Turns off the custom transform matrix. If TextAngle is set, it will take effect again.")]
+Public Sub ClearCustomTransformMatrix()
+    mUseCustMX = False
+End Sub
+
+Public Property Get RightToLeft() As Boolean: Return mRTL: End Property
+[Description("Sets the reading order of the text.")]
+Public Property Let RightToLeft(ByVal value As Boolean)
+    mRTL = value
+    OnRender()
+End Property
+
+Public Property Get BackColor() As stdole.OLE_COLOR: BackColor = clrBack: End Property
+Attribute BackColor.VB_Description = "Sets the background color of the label."
+Public Property Let BackColor(ByVal val As stdole.OLE_COLOR)
+If val = CLR_NONE Then Exit Property
+clrBack = val
+OnRender()
+End Property
+Public Property Get ForeColor() As stdole.OLE_COLOR: ForeColor = clrFore: End Property
+Attribute ForeColor.VB_Description = "Sets the forecolor of the label."
+Public Property Let ForeColor(ByVal val As stdole.OLE_COLOR)
+clrFore = val
+CreateTextBrush()
+OnRender()
+End Property
+
+Public Property Get Font() As StdFont: Set Font = PropFont: End Property
+Attribute Font.VB_Description = "Sets the font for the label."
+Public Property Let Font(ByVal NewFont As StdFont): Set Me.Font = NewFont: End Property
+Public Property Set Font(ByVal NewFont As StdFont)
+If NewFont Is Nothing Then Set NewFont = Ambient.Font
+Set PropFont = Nothing
+Set PropFont = CloneOLEFont(NewFont)
+    
+If m_FontScaleCXY Then
+    Set mIFMain = PropFont
+    mIFMain.SetRatio 96 * m_ScaleX, 2540
+End If
+ 
+     
+  
+UserControl.PropertyChanged "Font"
+End Property
+    
+    
+Private Sub PropFont_FontChanged(ByVal PropertyName As String)
+Dim TempFont As StdFont
+ 
+Set mIFMain = PropFont
+    
+Dim lftmp As LOGFONTW
+GetObjectW CLngPtr(mIFMain.hFont), LenB(lftmp), lftmp
+lftmp.LFQuality = CLEARTYPE_NATURAL_QUALITY
+ 
+Set UserControl.Font = PropFont
+OnRender()
+     
+UserControl.PropertyChanged "Font"
+End Sub
+Private Function CloneOLEFont(ByVal Font As IFont) As StdFont
+Font.Clone CloneOLEFont
+End Function
+#End Region
+
+[Description("When enabled, limit Underline effect to the specified range when it is applied.")]
+Public Sub UnderlineRange(ByVal bEnable As Boolean, Optional ByVal startPosition As Long = 0, Optional ByVal Length As Long = -1)
+    mUseULR = bEnable
+    mULRange.startPosition = startPosition
+    mULRange.Length = Length
+    OnRender()
+End Sub
+[Description("When enabled, limit Bold effect to the specified range when it is applied.")]
+Public Sub BoldRange(ByVal bEnable As Boolean, Optional ByVal startPosition As Long = 0, Optional ByVal Length As Long = -1)
+    mUseBR = bEnable
+    mBRange.startPosition = startPosition
+    mBRange.Length = Length
+    OnRender()
+End Sub
+[Description("When enabled, limit StrikeThru effect to the specified range when it is applied.")]
+Public Sub StrikeThruRange(ByVal bEnable As Boolean, Optional ByVal startPosition As Long = 0, Optional ByVal Length As Long = -1)
+    mUseSTR = bEnable
+    mSTRange.startPosition = startPosition
+    mSTRange.Length = Length
+    OnRender()
+End Sub
+[Description("When enabled, limit Italic effect to the specified range when it is applied.")]
+Public Sub ItalicizeRange(ByVal bEnable As Boolean, Optional ByVal startPosition As Long = 0, Optional ByVal Length As Long = -1)
+    mUseIR = bEnable
+    mIRange.startPosition = startPosition
+    mIRange.Length = Length
+    OnRender()
+End Sub
+[Description("When enabled, limit Stretch effect to the specified range when it is set to other than Normal.")]
+Public Sub StretchRange(ByVal bEnable As Boolean, Optional ByVal startPosition As Long = 0, Optional ByVal Length As Long = -1)
+    mUseSR = bEnable
+    mSRange.startPosition = startPosition
+    mSRange.Length = Length
+    OnRender()
+End Sub
+
+[Description("Sets the line spacing mode. See DWRITE_LINE_SPACING_METHOD.")]
+Public Sub SetLineSpacingMethod(ByVal value As Long)
+    mSpaceType = value
+    OnRender()
+End Sub
+
+Private Function SUCCEEDED(hr As Long) As Boolean
+    SUCCEEDED = (hr >= 0)
+End Function
+
+Private Function CreateDeviceIndependentResources() As Long
+On Error Resume Next 'Manual error handling
+Dim hr As Long '= S_OK
+hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, IID_ID2D1Factory, ByVal 0, Direct2dFactory)
+If (Direct2dFactory Is Nothing) Then hr = S_FALSE
+If SUCCEEDED(hr) Then
+    hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, IID_IDWriteFactory, DWriteFactory)
+    If (DWriteFactory Is Nothing) Then hr = S_FALSE
+    DebugAppend "D2D1CreateFactory succeeded; DWriteCreateFactory hr=0x" & Hex$(hr)
+Else
+    DebugAppend "D2D1CreateFactory failed, hr=0x" & Hex$(hr)
+End If
+Return hr
+End Function
+
+Private Function CreateDeviceResources() As Long
+On Error Resume Next
+Dim hr As Long '= S_OK
+Dim rc As RECT
+If RenderTarget Is Nothing Then
+Debug.Print "initsize", PropFont.Size
+    GetClientRect UserControl.hWnd, rc
+    Dim size As D2D1_SIZE_U
+    Dim rtProps As D2D1_RENDER_TARGET_PROPERTIES
+    Dim hwndProps As D2D1_HWND_RENDER_TARGET_PROPERTIES
+    size.width = rc.Right - rc.Left
+    size.Height = rc.Bottom - rc.Top
+    hwndProps.hwnd = UserControl.hWnd
+    hwndProps.pixelSize = size
+    Set RenderTarget = Direct2dFactory.CreateHwndRenderTarget(rtProps, hwndProps)
+    Direct2dFactory.GetDesktopDpi(m_ScaleX, m_ScaleY)
+    DebugAppend "FactoryDpi=" & m_ScaleX & ", " & m_ScaleY
+    hr = Err.LastHresult
+    If SUCCEEDED(hr) Then
+        hr = CreateTextBrush()
+        DebugAppend "D2D1CreateFactory::CreateHwndRenderTarget succeeded; RenderTarget.CreateSolidColorBrush hr=0x" & Hex$(hr)
+    Else
+        DebugAppend "D2D1CreateFactory::CreateHwndRenderTarget failed, hr=0x" & Hex$(hr)
+    End If
+    CreateDeviceResources = hr
+End If
+Exit Function
+e0:
+    hr = Err.Number
+    Resume Next
+End Function
+
+Private Function CreateTextBrush() As Long
+    On Error Resume Next
+    Set TextBrush = Nothing
+    Dim clrF As Long
+    OleTranslateColor clrFore, 0, clrF
+    Set TextBrush = RenderTarget.CreateSolidColorBrush(ColorF(clrF), vbNullPtr)
+    Return Err.LastHresult
+End Function
+
+[Description("Configures and enables a linear gradient brush to use instead of the solid ForeColor.")]
+Public Sub TextLinearGradientSet(pfStopPositions As Single, plStopColors As Long, ByVal cStops As Long, _
+                ByVal ptStartX As Single, ByVal ptStartY As Single, ByVal ptEndX As Single, ByVal ptEndY As Single, _
+                Optional ByVal ExtendMode As Long = 0 /* D2D1_EXTEND_MODE_CLAMP */)
+    On Error GoTo e0
+    Dim fSP() As Single
+    Dim lSC() As Long
+    ReDim fSP(cStops - 1)
+    ReDim lSC(cStops - 1)
+    CopyMemory fSP(0), ByVal VarPtr(pfStopPositions), cStops * LenB(Of Single)
+    CopyMemory lSC(0), ByVal VarPtr(plStopColors), cStops * LenB(Of Single)
+    
+    Dim stops() As D2D1_GRADIENT_STOP
+    ReDim stops(cStops - 1)
+    For i As Long = 0 To cStops - 1
+        stops(i).color = ColorF(OleTranslateColor(lSC(i), 0))
+        stops(i).position = fSP(i)
+    Next
+ 
+    
+    
+    Set GradStops = RenderTarget.CreateGradientStopCollection(stops(0), cStops, D2D1_GAMMA_2_2, ExtendMode)
+    
+    Set TextGradientBrush = RenderTarget.CreateLinearGradientBrush( _
+                LinearGradientBrushProperties(Point2F(ptStartX, ptStartY), Point2F(ptEndX, ptEndY)), _
+                vbNullPtr, GradStops)
+    
+    mGradEnable = 1
+    OnRender()
+    Exit Sub
+e0:
+    DebugAppend "Unexpected error in " & CurrentProcedureName & ": 0x" & Hex$(Err.Number) & ", " & Err.Description
+End Sub
+[Description("Configures and enables a radial gradient brush to use instead of the solid ForeColor.")]
+Public Sub TextRadialGradientSet(pfStopPositions As Single, plStopColors As Long, ByVal cStops As Single, _
+                ptCenterX As Single, ptCenterY As Single, _
+                ptgradientOriginOffsetX As Single, ptgradientOriginOffsetY As Single, _
+                radiusX As Single, radiusY As Single, _
+                Optional ByVal ExtendMode As Long = 0 /* D2D1_EXTEND_MODE_CLAMP */)
+    On Error GoTo e0
+    Dim fSP() As Single
+    Dim lSC() As Long
+    ReDim fSP(cStops - 1)
+    ReDim lSC(cStops - 1)
+    CopyMemory fSP(0), ByVal VarPtr(pfStopPositions), cStops * LenB(Of Single)
+    CopyMemory lSC(0), ByVal VarPtr(plStopColors), cStops * LenB(Of Single)
+    
+    Dim stops() As D2D1_GRADIENT_STOP
+    ReDim stops(cStops - 1)
+    For i As Long = 0 To cStops - 1
+        stops(i).color = ColorF(OleTranslateColor(lSC(i), 0))
+        stops(i).position = fSP(i)
+    Next
+    
+    Set GradStops = RenderTarget.CreateGradientStopCollection(stops(0), cStops, D2D1_GAMMA_2_2, ExtendMode)
+    
+    Set TextGradientBrushR = RenderTarget.CreateRadialGradientBrush( _
+            RadialGradientBrushProperties(Point2F(ptCenterX, ptCenterY), Point2F(ptgradientOriginOffsetX, ptgradientOriginOffsetY), radiusX, radiusY), _
+            vbNullPtr, GradStops)
+    
+    mGradEnable = 2
+    OnRender()
+    Exit Sub
+e0:
+    DebugAppend "Unexpected error in " & CurrentProcedureName & ": 0x" & Hex$(Err.Number) & ", " & Err.Description
+End Sub
+[Description("Restores use of a solid color (ForeColor) brush for the text")]
+Public Sub TextGradientClear()
+    mGradEnable = 0
+    Set TextGradientBrush = Nothing
+    Set GradStops = Nothing
+    OnRender()
+End Sub
+
+Public Sub Refresh()
+    OnRender()
+End Sub
+
+Private Function OnRender() As Long
+    On Error Resume Next
+    Dim hr As Long = S_OK
+    Dim RenderCanvasArea As D2D1_SIZE_F
+    Dim TextFormat As IDWriteTextFormat
+    Dim TextLayout As IDWriteTextLayout
+    Dim TextCanvasArea As D2D1_RECT_F
+    Dim clrWhite As D2D1_COLOR_F
+    Dim rc As RECT
+    hr = CreateDeviceResources()
+    
+    If SUCCEEDED(hr) Then
+        RenderTarget.BeginDraw
+        'RenderCanvasArea = RenderTarget.GetSize()
+        GetClientRect UserControl.hWnd, rc
+        RenderCanvasArea.width = rc.Right
+        RenderCanvasArea.Height = rc.Bottom
+        ' clrWhite.r = 1#: clrWhite.g = 1#: clrWhite.b = 1#: clrWhite.a = 0#
+        ' RenderTarget.Clear clrWhite ' D2D1.ColorF(White)
+        Dim clrb As Long
+        OleTranslateColor clrBack, 0, clrb
+        RenderTarget.Clear(ColorF(clrb))
+        hr = Err.LastHresult
+        If SUCCEEDED(hr) Then
+            Dim fw As DWRITE_FONT_WEIGHT = _
+                If(PropFont.Bold, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_REGULAR)
+            Dim fs As DWRITE_FONT_STYLE = _
+                If(PropFont.Italic, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL)
+            Dim rtl As DWRITE_READING_DIRECTION = _
+                If(mRTL, DWRITE_READING_DIRECTION_RIGHT_TO_LEFT, DWRITE_READING_DIRECTION_LEFT_TO_RIGHT)
+            
+            Set TextFormat = DWriteFactory.CreateTextFormat( _
+                                            StrPtr(PropFont.Name), _
+                                            Nothing, _
+                                            If(mUseBR, DWRITE_FONT_WEIGHT_REGULAR, fw), _
+                                            If(mUseIR, DWRITE_FONT_STYLE_NORMAL, fs), _
+                                            If(mUseSR, DWRITE_FONT_STRETCH_NORMAL, CType(Of DWRITE_FONT_STRETCH)(mStretch)), _
+                                            PropFont.Size, _
+                                            StrPtr(mLocale))
+            hr = Err.LastHresult
+            If (SUCCEEDED(hr)) And ((TextFormat Is Nothing) = False) Then
+                TextFormat.SetTextAlignment(CType(Of DWRITE_TEXT_ALIGNMENT)(nAlign))
+                TextFormat.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)
+                TextFormat.SetReadingDirection(rtl)
+                TextFormat.SetWordWrapping(CType(Of DWRITE_WORD_WRAPPING)(mWrap))
+                TextCanvasArea.Right = RenderCanvasArea.width
+                TextCanvasArea.Bottom = RenderCanvasArea.Height
+                
+                Set TextLayout = DWriteFactory.CreateTextLayout(StrPtr(mText), Len(mText), _
+                                    TextFormat, TextCanvasArea.Right - TextCanvasArea.Left, _
+                                    TextCanvasArea.Bottom - TextCanvasArea.Top)
+                
+                
+                Dim range As DWRITE_TEXT_RANGE
+                range.Length = -1
+                If mUseULR Then
+                    TextLayout.SetUnderline(If(PropFont.Underline, CTRUE, CFALSE), DCast1(Of LongLong)(mULRange))
+                Else
+                    TextLayout.SetUnderline(If(PropFont.Underline, CTRUE, CFALSE), DCast1(Of LongLong)(range))
+                End If
+                If mUseSTR Then
+                    TextLayout.SetStrikethrough(If(PropFont.Strikethrough, CTRUE, CFALSE), DCast1(Of LongLong)(mSTRange))
+                Else
+                    TextLayout.SetStrikethrough(If(PropFont.Strikethrough, CTRUE, CFALSE), DCast1(Of LongLong)(range))
+                End If
+                If mUseBR Then
+                    If PropFont.Bold Then
+                        TextLayout.SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, DCast1(Of LongLong)(mBRange))
+                    End If
+                End If
+                If mUseIR Then
+                    If PropFont.Italic Then
+                        TextLayout.SetFontStyle(DWRITE_FONT_STYLE_ITALIC, DCast1(Of LongLong)(mIRange))
+                    End If
+                End If
+                If mUseSR Then
+                     TextLayout.SetFontStretch(mStretch, DCast1(Of LongLong)(mSRange))
+                End If
+                
+                If mLineSpacing Then
+                    TextFormat.SetLineSpacing mSpaceType, mLineSpacing, 0.80
+                End If
+                
+                If mUseCustMX Then
+                    RenderTarget.SetTransform mCustMX
+                Else
+                    If mAngle Then
+                        Dim mx As D2D1_MATRIX_3X2_F
+                        Dim angle As Single = CSng(mAngle * (M_PI / 180))
+                        mx.m_11 = CSng(Cos(angle))
+                        mx.m_12 = CSng(-Sin(angle))
+                        mx.m_21 = CSng(Sin(angle))
+                        mx.m_22 = CSng(Cos(angle))
+                        If mAngle >= 360 Then
+                            Do
+                                mAngle -= 360
+                            Loop Until mAngle < 360
+                        End If
+                        Select Case mAngle
+                            Case 0 To 90
+                                mx.m_31 = CSng(0 /* Left */)
+                                mx.m_32 = CSng(RenderCanvasArea.Height * 0.90 /* Top */)
+                                
+                            Case 90 To 180
+                                mx.m_31 = CSng(RenderCanvasArea.width * 0.90 /* Left */)
+                                mx.m_32 = CSng(RenderCanvasArea.Height * 0.90 /* Top */)
+                                                            
+                            Case 180 To 270
+                                mx.m_31 = CSng(RenderCanvasArea.width / 2 /* Left */)
+                                mx.m_32 = CSng(RenderCanvasArea.Height * 0.10 /* Top */)
+                                                            
+                            Case 270 To 359
+                                mx.m_31 = CSng(RenderCanvasArea.width * 0.10 /* Left */)
+                                mx.m_32 = CSng(0 /* Top */)
+                        End Select
+                        RenderTarget.SetTransform mx
+                    End If
+                End If
+                
+                If mGradEnable = 1 Then
+                    RenderTarget.DrawTextLayout 0, TextLayout, TextGradientBrush, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT
+                ElseIf mGradEnable = 2 Then
+                    RenderTarget.DrawTextLayout 0, TextLayout, TextGradientBrushR, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT
+                Else
+                    RenderTarget.DrawTextLayout 0, TextLayout, TextBrush, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT
+                End If
+  
+            End If
+        End If
+        
+        RenderTarget.EndDraw ByVal 0, ByVal 0
+        hr = Err.LastHresult
+    End If
+    
+    If hr = D2DERR_RECREATE_TARGET Then
+        Set RenderTarget = Nothing
+        Set TextBrush = Nothing
+        Set TextBrush = Nothing
+        Set TextBrush = Nothing
+        hr = S_OK
+    End If
+    
+    Return hr
+
+End Function
+'BUGBUG removed when fixed:
+Public Function DCast1(Of T, T2)(v As T2) As T
+    If LenB(Of T2) >= LenB(Of T) Then
+        vbaCopyBytes(LenB(Of T), VarPtr(DCast1), VarPtr(v))
+    Else
+        vbaCopyBytes(LenB(Of T2), VarPtr(DCast1), VarPtr(v))
+    End If
+End Function
+'--
+
+
+Private Function Point2F( _
+                ByVal fX As Single, _
+                ByVal fY As Single) As D2D1_POINT_2F
+                
+    Point2F.x = fX
+    Point2F.y = fY
+    
+End Function
+Private Function ColorF( _
+                ByVal eColor As D2D1_COLORS, _
+                Optional ByVal fAlpha As Single = 1!) As D2D1_COLOR_F
+    Dim bR As Byte
+    Dim bB As Byte
+    Dim bG As Byte
+
+    'bB = eColor And &HFF
+    bB = (eColor \ &H10000) And &HFF
+    bG = (eColor \ &H100) And &HFF
+    'bR = (eColor \ &H10000) And &HFF
+    bR = eColor And &HFF
+    With ColorF
+
+    .r = bR / 255!
+    .g = bG / 255!
+    .b = bB / 255!
+    .a = fAlpha
+
+    End With
+
+End Function
+Private Function LinearGradientBrushProperties( _
+                ByRef tStartPoint As D2D1_POINT_2F, _
+                ByRef tEndPoint As D2D1_POINT_2F) As D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES
+                
+    With LinearGradientBrushProperties
+    
+    .startPoint = tStartPoint
+    .endPoint = tEndPoint
+    
+    End With
+    
+End Function
+Private Function RadialGradientBrushProperties( _
+                ByRef tCenter As D2D1_POINT_2F, _
+                ByRef tGradientOriginOffset As D2D1_POINT_2F, _
+                ByVal fRadiusX As Single, _
+                ByVal fRadiusY As Single) As D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES
+                
+    With RadialGradientBrushProperties
+    
+    .center = tCenter
+    .gradientOriginOffset = tGradientOriginOffset
+    .radiusX = fRadiusX
+    .radiusY = fRadiusY
+    
+    End With
+    
+End Function
+Private Function Subclass2(hWnd As LongPtr, lpFN As LongPtr, Optional uId As LongPtr = 0&, Optional dwRefData As LongPtr = 0&) As Boolean
+If uId = 0 Then uId = hWnd
+    Return SetWindowSubclass(hWnd, lpFN, uId, dwRefData):      Debug.Assert Subclass2
+End Function
+
+Private Function UnSubclass2(hWnd As LongPtr, ByVal lpFN As LongPtr, pid As LongPtr) As Boolean
+    Return RemoveWindowSubclass(hWnd, lpFN, pid)
+End Function
+
+Private Function ucWndProc(ByVal hWnd As LongPtr, ByVal uMsg As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr, ByVal uIdSubclass As LongPtr, ByVal dwRefData As LongPtr) As LongPtr
+    Select Case uMsg
+        Case WM_SIZE
+            Dim cx As Long = LOWORD(CLng(lParam))
+            Dim cy As Long = HIWORD(CLng(lParam))
+            
+            If RenderTarget IsNot Nothing Then
+                Dim tSz As D2D1_SIZE_U
+                tSz.width = cx
+                tSz.Height = cy
+                RenderTarget.Resize tSz
+                
+            End If
+            DebugAppend "size::" & cx & "," & cy
+            Exit Function
+        
+        Case WM_DISPLAYCHANGE
+            InvalidateRect hWnd, vbNullPtr, CFALSE
+            
+            Exit Function
+            
+        Case WM_PAINT
+            OnRender()
+            ValidateRect hWnd, vbNullPtr
+            
+            Exit Function
+            
+        Case WM_DESTROY
+            Call UnSubclass2(hWnd, AddressOf ucWndProc, uIdSubclass)
+    End Select
+
+    Return DefSubclassProc(hWnd, uMsg, wParam, lParam)
+End Function
+
+End Class

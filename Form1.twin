@@ -1,0 +1,27 @@
+[Description("")]
+[FormDesignerId("BF0DAC0A-84F9-496C-95E7-687B77D55434")]
+[PredeclaredId]
+Class Form1
+
+ 
+    Private Sub Form_Activate() Handles Form.Activate
+        Dim rc As RECT
+        GetClientRect(ucColorFontLabel1.hWnd, rc)
+        ucColorFontLabel1.UnderlineRange(True, 3, Len(ucColorFontLabel1.Caption) - 3)
+        Dim grStop(2) As Single = Array(0.0, 0.5, 1.0)
+        Dim grClr(2) As OLE_COLOR = Array(vbRed, vbWhite, vbBlue)
+        ucColorFontLabel1.TextLinearGradientSet(grStop(0), grClr(0), UBound(grStop) + 1, _
+        rc.Right / 2, 0, rc.Right / 2, rc.Bottom)
+
+ 
+        ucColorFontLabel6.UnderlineRange(True, 3, Len(ucColorFontLabel6.Caption) - 3)
+        ucColorFontLabel6.TextLinearGradientSet(grStop(0), grClr(0), UBound(grStop) + 1, _
+        rc.Right / 2, 0, rc.Right / 2, rc.Bottom)
+        
+    End Sub
+    
+    Private Sub ucColorFontLabel1_DragEnterOLE(ByVal dataObject As IDataObject, ByVal grfKeyState As Long, pt As POINT, effect As Long) Handles ucColorFontLabel1.DragEnterOLE
+        
+    End Sub
+    
+End Class
