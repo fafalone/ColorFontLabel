@@ -56,7 +56,7 @@ For commercial use, contact me at fafalone@gmail.com.
 ### Usage notes
 
 - Limiting font effect ranges must be done at runtime, through the BoldRange, ItalicizeRange, UnderlineRange, StrikethruRange, and StretchRange. The bEnable argument for those methods indicates that **if active**, the  alternate range supplied should be used, e.g. the Font underline property must be set in addition to passing bEnabled=True. This is so it can be toggled  without changing the font every time.
-- twinBASIC fully supports text in the editor, so you can set the text through the Properties in design mode or at runtime just by using the string. If you use this as an ActiveX control in VB6 or VBA, note that you'll need to use an alternative ChrW implementation and add emojis with that:
+- twinBASIC fully supports Unicode text and color fonts in the editor, so you can set the text through the Properties in design mode or at runtime just by using the string. If you use this as an ActiveX control in VB6 or VBA, note that you'll need to use an alternative ChrW implementation and add emojis with that:
 ```vba   
     Public Function ChrW2(ByVal CharCode As Long) As String
     Const POW10 As Long = 2 ^ 10
