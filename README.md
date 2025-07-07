@@ -12,6 +12,12 @@ Creative Commons Attribution-NonCommercial 4.0 International license.
 For commercial use, contact me at fafalone@gmail.com. 
 
 **Updates**
+
+- v1.2 (07 Jul 2025) 
+  - Added support for Picture property to set a background image. PictureStretch property sets whether it's stretched to fill the label. If not, you can set an x/y offset with PictureOffsetX/Y.
+
+  - ![image](https://github.com/user-attachments/assets/7bd57627-c4f2-49c1-9184-defa09eddb8b)
+
 - v1.1 (05 Jul 2025) 
     - Now using quicker/more stable DC render target. Thanks to Wayne Phillips for
         this contribution. This works better in the IDE and faster at runtime.
