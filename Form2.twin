@@ -1,0 +1,17 @@
+[Description("")]
+[FormDesignerId("6A540EE8-A62F-4B36-A6C8-1C8B103D104F")]
+[PredeclaredId]
+Class Form2
+
+	Sub New()
+	End Sub
+    
+    Private Sub Form_Load() Handles Form.Load
+        
+    End Sub
+    
+    Private Sub Form_Activate() Handles Form.Activate
+        ' ucColorFontLabel1.Caption = "Line 1Line 1Line 1Line 1Line 1Line 1Line 1Line 1Line 1Line 1Line 1Line 1Line 1Line 1Line 1Line 1Line 1Line 1Line 1Line 1Line 1" & vbCrLf & "LIne 2"
+    End Sub
+
+End Class

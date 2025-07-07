@@ -1,4 +1,4 @@
-[Description("Color Font Label Control v1.1")]
+[Description("Color Font Label Control v1.2")]
 [FormDesignerId("95B0B2E5-5DAB-4961-B40E-FB8A132A8600")]
 [ClassId("B3F85F82-99CE-450A-818B-05A042F4F99F")]
 [InterfaceId("B4FCE572-7E21-4A0E-870F-8DA559DF3871")]
@@ -15,7 +15,7 @@ Private Const dbg_MinLevel As Long = 0&   'Only log to immediate/file messages >
 Private Const dbg_RaiseEvent As Boolean = True
 
 '*********************************************************************************************
-'Color Font Label Control v1.1
+'Color Font Label Control v1.2
 'by Jon Johnson
 '(c) 2025, Details: LICENSE.md: Licensed for non-commercial use only under the
 'Creative Commons Attribution-NonCommercial 4.0 International license.
@@ -81,6 +81,10 @@ Private Const dbg_RaiseEvent As Boolean = True
 '
 ' **Changelog**
 '
+'- v1.2 (07 Jul 2025) 
+'   - Added support for Picture property to set a background image. PictureStretch
+'      property sets whether it's stretched to fill the label. If not, you can set
+'      an x/y offset with PictureOffsetX/Y.
 '- v1.1 (05 Jul 2025) 
 '   - Now using quicker/more stable DC render target. Thanks to Wayne Phillips for
 '       this contribution. This works better in the IDE and faster at runtime.
@@ -118,6 +122,19 @@ Private TextBrush As ID2D1SolidColorBrush
 Private TextGradientBrush As ID2D1LinearGradientBrush
 Private TextGradientBrushR As ID2D1RadialGradientBrush
 Private GradStops As ID2D1GradientStopCollection
+Private BackImage As ID2D1Bitmap
+Private pWicFact As WICImagingFactory
+Private pWicBmp As IWICBitmap, pWicBmpC As IWICBitmap
+Private pConverter As IWICFormatConverter
+
+Private PropPicture As StdPicture
+Private hBack As LongPtr
+Private bkgCX As Long, bkgCY As Long
+Private mBkX As Long, mBkY As Long
+Private mStretchBk As Boolean
+Private Const mDefStretchBk As Boolean = False
+
+
 
 Private WithEvents PropFont As StdFont
 Private mIFMain As IFont
@@ -186,6 +203,17 @@ End Enum
 Private mAlias As ColorFontLabelTextAliasing
 Private Const mDefAlias As Long = CFLTA_Default
 
+Public Enum ColorFontLabelFlowDirection
+    'Maps to DWRITE_FLOW_DIRECTION
+    CFLFD_TopToBotom
+    CFLFD_BottomToTop
+    CFLFD_LeftToRight
+    CFLFD_RightToLeft
+End Enum
+Private mFlow As ColorFontLabelFlowDirection
+Private Const mDefFlow As Long = CFLFD_TopToBotom
+
+
 Private mLineSpacing As Single
 Private Const mDefLineSpacing As Single = 0
 Private mSpaceType As DWRITE_LINE_SPACING_METHOD
@@ -253,7 +281,14 @@ Private Sub UserControl_Show() Handles UserControl.Show
             RegisterDragDrop(UserControl.hWnd, Me)
         End If
     End If
- 
+    If PropPicture IsNot Nothing Then
+        OnRender()
+        Set BackImage = Nothing
+        If hBack Then DeleteObject hBack: hBack = 0
+        hBack = PropPicture.Handle 'BitmapHandleFromPicture(PropPicture, clrBack)
+        CreateD2DBitmapFromHBITMAP(hBack)
+        OnRender()
+    End If
  End Sub
 Private Sub UserControl_Terminate() Handles UserControl.Terminate
     UnSubclass2 UserControl.hWnd, AddressOf ucWndProc, UserControl.hWnd
@@ -261,6 +296,11 @@ Private Sub UserControl_Terminate() Handles UserControl.Terminate
     Set GradStops = Nothing
     Set Direct2dFactory = Nothing
     Set DWriteFactory = Nothing
+    Set BackImage = Nothing
+    Set pConverter = Nothing
+    Set pWicBmp = Nothing
+    Set pWicFact = Nothing
+    If hBack Then DeleteObject hBack: hBack = 0
     Set RenderTarget = Nothing
     Set pDTH = Nothing
 End Sub
@@ -281,6 +321,8 @@ Private Sub UserControl_InitProperties() Handles UserControl.InitProperties
     mDD = mDefDD
     mAlias = mDefAlias
     mBorder = mDefBorder
+    mFlow = mDefFlow
+    mStretchBk = mDefStretchBk
 End Sub
 
 Private Sub UserControl_ReadProperties(PropBag As PropertyBag) Handles UserControl.ReadProperties
@@ -298,6 +340,11 @@ Private Sub UserControl_ReadProperties(PropBag As PropertyBag) Handles UserContr
     mDD = PropBag.ReadProperty("AllowDragDrop", mDefDD)
     mAlias = PropBag.ReadProperty("Antialiasing", mDefAlias)
     mBorder = PropBag.ReadProperty("BorderStyle", mDefBorder)
+    mFlow = PropBag.ReadProperty("FlowDirection", mDefFlow)
+    Set PropPicture = PropBag.ReadProperty("Picture", Nothing)
+    mStretchBk = PropBag.ReadProperty("PictureStretch", mDefStretchBk)
+    mBkX = PropBag.ReadProperty("PictureOffsetX", 0&)
+    mBkY = PropBag.ReadProperty("PictureOffsetY", 0&)
 End Sub
 
 Private Sub UserControl_WriteProperties(PropBag As PropertyBag) Handles UserControl.WriteProperties
@@ -315,6 +362,11 @@ Private Sub UserControl_WriteProperties(PropBag As PropertyBag) Handles UserCont
     PropBag.WriteProperty "AllowDragDrop", mDD, mDefDD
     PropBag.WriteProperty "Antialiasing", mAlias, mDefAlias
     PropBag.WriteProperty "BorderStyle", mBorder, mDefBorder
+    PropBag.WriteProperty "FlowDirection", mFlow, mDefFlow
+    PropBag.WriteProperty "Picture", PropPicture, Nothing
+    PropBag.WriteProperty "PictureStretch", mStretchBk, mDefStretchBk
+    PropBag.WriteProperty "PictureOffsetX", mBkX, 0&
+    PropBag.WriteProperty "PictureOffsetY", mBkY, 0&
 End Sub
 
 Private Sub UserControl_Click() Handles UserControl.Click
@@ -436,6 +488,12 @@ Public Property Let Antialiasing(ByVal value As ColorFontLabelTextAliasing)
     OnRender()
 End Property
 
+Public Property Get FlowDirection() As ColorFontLabelFlowDirection: Return mFlow: End Property
+[Description("Sets the direction lines are drawn in.")]
+Public Property Let FlowDirection(ByVal value As ColorFontLabelFlowDirection)
+    mFlow = value
+    OnRender()
+End Property
 
 Public Property Get LineSpacing() As Single: Return mLineSpacing: End Property
 [Description("Sets the spacing between lines of text.")]
@@ -488,16 +546,46 @@ End Property
 Public Property Get BackColor() As stdole.OLE_COLOR: BackColor = clrBack: End Property
 Attribute BackColor.VB_Description = "Sets the background color of the label."
 Public Property Let BackColor(ByVal val As stdole.OLE_COLOR)
-If val = CLR_NONE Then Exit Property
-clrBack = val
-OnRender()
+    If val = CLR_NONE Then Exit Property
+    clrBack = val
+    OnRender()
 End Property
 Public Property Get ForeColor() As stdole.OLE_COLOR: ForeColor = clrFore: End Property
 Attribute ForeColor.VB_Description = "Sets the forecolor of the label."
 Public Property Let ForeColor(ByVal val As stdole.OLE_COLOR)
-clrFore = val
-CreateTextBrush()
-OnRender()
+    clrFore = val
+    CreateTextBrush()
+    OnRender()
+End Property
+
+Public Property Get Picture() As IPictureDisp: Set Picture = PropPicture: End Property
+Attribute Picture.VB_Description = "Sets a background image in the label. Subs to set a hBmp or URL are available as an alternative."
+Public Property Let Picture(ByVal pIPD As IPictureDisp): Set PropPicture = pIPD: End Property
+Public Property Set Picture(ByVal pIPD As IPictureDisp)
+    Set PropPicture = pIPD
+    Set BackImage = Nothing
+    If hBack Then DeleteObject hBack: hBack = 0
+    If PropPicture IsNot Nothing Then
+        hBack = PropPicture.Handle 'BitmapHandleFromPicture(PropPicture, clrBack)
+        CreateD2DBitmapFromHBITMAP(hBack)
+    End If
+    OnRender()
+End Property
+
+Public Property Get PictureStretch() As Boolean:   PictureStretch = mStretchBk: End Property
+Attribute Picture.VB_Description = "Stretch the picture to fit the entire background."
+Public Property Let PictureStretch(ByVal value As Boolean)
+    mStretchBk = value
+End Property
+Public Property Get PictureOffsetX() As Boolean:   PictureOffsetX = mBkX: End Property
+Attribute Picture.VB_Description = "Offset the coordinates of the picture. Ignored if PictureStretch is True."
+Public Property Let PictureOffsetX(ByVal value As Boolean)
+    mBkX = value
+End Property
+Public Property Get PictureOffsetY() As Boolean:   PictureOffsetY = mBkY: End Property
+Attribute Picture.VB_Description = "Offset the coordinates of the picture. Ignored if PictureStretch is True."
+Public Property Let PictureOffsetY(ByVal value As Boolean)
+    mBkY = value
 End Property
 
 Public Property Get Font() As StdFont: Set Font = PropFont: End Property
@@ -508,12 +596,12 @@ If NewFont Is Nothing Then Set NewFont = Ambient.Font
 Set PropFont = Nothing
 Set PropFont = CloneOLEFont(NewFont)
     
-' If m_FontScaleCXY Then
-'     Set mIFMain = PropFont
-'     mIFMain.SetRatio 96 * m_ScaleX, 2540
-'     DebugAppend "ScaleFont " & m_ScaleX
-' End If
- 
+If m_FontScaleCXY Then
+    Set mIFMain = PropFont
+    mIFMain.SetRatio 96 * m_ScaleX, 2540
+    DebugAppend "ScaleFont " & m_ScaleX & ", " & PropFont.Size
+End If
+ Set UserControl.Font = PropFont
 OnRender()
   
 UserControl.PropertyChanged "Font"
@@ -622,7 +710,7 @@ Debug.Print "initsize", PropFont.Size
     
     rtProps.type = D2D1_RENDER_TARGET_TYPE_DEFAULT
     rtProps.PixelFormat.Format = DXGI_FORMAT_B8G8R8A8_UNORM
-    rtProps.PixelFormat.AlphaMode = D2D1_ALPHA_MODE_IGNORE ' or _PREMULTIPLIED if needed 
+    rtProps.PixelFormat.AlphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED ' or _IGNORE if needed 
     Direct2dFactory.GetDesktopDpi(rtProps.DpiX, rtProps.DpiY)
      rtProps.Usage = D2D1_RENDER_TARGET_USAGE_NONE
     rtProps.minLevel = D2D1_FEATURE_LEVEL_DEFAULT
@@ -643,6 +731,38 @@ Exit Function
 e0:
     hr = Err.Number
     Resume Next
+End Function
+
+Private Function CreateD2DBitmapFromHBITMAP(ByVal hBitmap As LongPtr) As Long
+    On Error Resume Next
+    If pWicFact Is Nothing Then Set pWicFact = New WICImagingFactory
+    pWicFact.CreateBitmapFromHBITMAP hBitmap, 0, WICBitmapUseAlpha, pWicBmp
+    Dim hr As Long = Err.LastHresult
+    If SUCCEEDED(hr) Then
+        Set pConverter = pWicFact.CreateFormatConverter()
+        hr = Err.LastHresult
+        If SUCCEEDED(hr) Then
+            pConverter.Initialize(pWicBmp, _
+                                    GUID_WICPixelFormat32bppPBGRA /* D2D-compatible format */, _
+                                    WICBitmapDitherTypeNone, _
+                                    Nothing, _
+                                    0.0, _
+                                    WICBitmapPaletteTypeCustom)
+            hr = Err.LastHresult
+            If SUCCEEDED(hr) Then
+                hr = pWicFact.CreateBitmapFromSource(pConverter, WICBitmapCacheOnLoad, pWicBmpC)
+                If SUCCEEDED(hr) Then
+                    If RenderTarget IsNot Nothing Then
+                        Set BackImage = RenderTarget.CreateBitmapFromWicBitmap(pWicBmpC, vbNullPtr)
+                        hr = Err.LastHresult
+                    Else
+                        hr = E_FAIL
+                    End If
+                End If
+           End If
+        End If
+    End If
+    Return hr
 End Function
 
 Private Function CreateTextBrush() As Long
@@ -736,27 +856,43 @@ Private Function OnRender() As Long
     On Error Resume Next
     Dim hr As Long = S_OK
     Dim RenderCanvasArea As D2D1_SIZE_F
+    Dim TextCanvasArea As D2D1_RECT_F
     Dim TextFormat As IDWriteTextFormat
     Dim TextLayout As IDWriteTextLayout
-    Dim TextCanvasArea As D2D1_RECT_F
     Dim clrWhite As D2D1_COLOR_F
     Dim rc As RECT
     hr = CreateDeviceResources()
         
     If SUCCEEDED(hr) Then
-    GetClientRect UserControl.hWnd, rc
-    RenderTarget.BindDC(Me.hDC, rc)
-    
+        GetClientRect UserControl.hWnd, rc
+        RenderTarget.BindDC(Me.hDC, rc)
         RenderTarget.BeginDraw
-        'RenderCanvasArea = RenderTarget.GetSize()
-        'GetClientRect UserControl.hWnd, rc
         RenderCanvasArea.width = rc.Right
         RenderCanvasArea.Height = rc.Bottom
-        ' clrWhite.r = 1#: clrWhite.g = 1#: clrWhite.b = 1#: clrWhite.a = 0#
-        ' RenderTarget.Clear clrWhite ' D2D1.ColorF(White)
+        TextCanvasArea.Right = RenderCanvasArea.width
+        TextCanvasArea.Bottom = RenderCanvasArea.Height
+        
         Dim clrb As Long
         OleTranslateColor clrBack, 0, clrb
         RenderTarget.Clear(ColorF(clrb))
+
+         If BackImage IsNot Nothing Then
+            Dim tSz As D2D1_SIZE_F = BackImage.GetSize()
+            Dim picRECT As D2D1_RECT_F
+            Dim dstRC As D2D1_RECT_F
+            picRECT.Right = tSz.width: picRECT.Bottom = tSz.Height
+            If mStretchBk Then
+                dstRC.Left = mBkX: dstRC.Top = mBkY
+                dstRC.Right = rc.Right + mBkX: dstRC.Bottom = rc.Bottom + mBkY
+            Else
+                dstRC = picRECT
+            End If
+            RenderTarget.DrawBitmap BackImage, dstRC, 1, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, picRECT
+            hr = Err.LastHresult
+            If FAILED(hr) Then
+                DebugAppend "RenderPic failed, 0x" & Hex$(hr) & ", " & GetSystemErrorString(hr)
+            End If
+        End If
         hr = Err.LastHresult
         If SUCCEEDED(hr) Then
             Dim fw As DWRITE_FONT_WEIGHT = _
@@ -780,13 +916,11 @@ Private Function OnRender() As Long
                 TextFormat.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)
                 TextFormat.SetReadingDirection(rtl)
                 TextFormat.SetWordWrapping(CType(Of DWRITE_WORD_WRAPPING)(mWrap))
-                TextCanvasArea.Right = RenderCanvasArea.width
-                TextCanvasArea.Bottom = RenderCanvasArea.Height
+                TextFormat.SetFlowDirection(CType(Of DWRITE_FLOW_DIRECTION)(mFlow))
                 
                 Set TextLayout = DWriteFactory.CreateTextLayout(StrPtr(mText), Len(mText), _
                                     TextFormat, TextCanvasArea.Right - TextCanvasArea.Left, _
                                     TextCanvasArea.Bottom - TextCanvasArea.Top)
-                
                 
                 Dim range As DWRITE_TEXT_RANGE
                 range.Length = -1
@@ -889,8 +1023,7 @@ Public Function DCast1(Of T, T2)(v As T2) As T
     End If
 End Function
 '--
-
-
+ 
 Private Function Point2F( _
                 ByVal fX As Single, _
                 ByVal fY As Single) As D2D1_POINT_2F
@@ -971,7 +1104,7 @@ Private Function ucWndProc(ByVal hWnd As LongPtr, ByVal uMsg As Long, ByVal wPar
                 'RenderTarget.Resize tSz
                 
             End If
-            DebugAppend "size::" & cx & "," & cy
+            ' DebugAppend "size::" & cx & "," & cy
             Exit Function
         
         Case WM_DISPLAYCHANGE
