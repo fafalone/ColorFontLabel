@@ -41,6 +41,7 @@ There's some size issues on high DPI displays, but since there's a lot fewer pro
 - Antialiasing options
 - Can act as a drop target for DragDrop from other apps and displays the fancy icons like Explorer.
 - Mouse events including MouseWheel
+- Background picture property with stretch or offset options
 - Normal Label properties like Alignment, RightToLeft, ForeColor/BackColor, etc.
 - Comes with OCX version that works in VB6 and Office (both 32bit and 64bit). (OCX can be used in tB as well but the UserControl version from ucColorLabelTest.twinproj is strongly recommended.)
 
