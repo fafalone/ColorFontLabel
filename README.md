@@ -53,7 +53,7 @@ There's some size issues on high DPI displays, but since there's a lot fewer pro
 ![image](https://github.com/user-attachments/assets/2aebfb7f-7b36-4fc3-a7b4-c9c458c545f4)
 
 ### Requirements
-- Color Font support is only available on Windows 8 and above. This control should on Windows 7, but everything will be black and white. Does not work on XP or earlier.
+- Color Font support is only available on Windows 8 and above. This control should work on Windows 7, but everything will be black and white. Does not work on XP or earlier.
 - This project is written in [twinBASIC](https://github.com/twinbasic/documentation/wiki/twinBASIC-Frequently-Asked-Questions-(FAQs)). You'll need [a recent version](https://github.com/twinbasic/twinbasic/releases) to compile it; absolutely minimum Beta 820. Note that if you're not a subscriber the 64bit version will have a splash screen added.
 - To use as a UserControl in twinBASIC, the project must reference Windows Development Library for twinBASIC (WinDevLib) v9.1.566 or higher (References->Available packages).
 
