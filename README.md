@@ -1,4 +1,4 @@
-# 🌈 ColorFontLabel
+# 🌈 ColorFontLabel v1.3
 Enhanced Label UserControl/ActiveX Control Supporting Color Fonts (i.e. color emojis)
 
 ![image](https://github.com/user-attachments/assets/20f47c40-fc97-4c82-9f68-e3c0e72cb4ed) ![image](https://github.com/user-attachments/assets/1b239fa8-4d44-44eb-9e56-cb1737d2091c)
@@ -12,6 +12,10 @@ Creative Commons Attribution-NonCommercial 4.0 International license.
 For commercial use, contact me at fafalone@gmail.com. 
 
 **Updates**
+
+- v1.3 (07 Jul 2025) 
+   - Bug fix: Font was smaller than regular label with same font/size.
+   - Bug fix: PictureStretch size wrong when DPI awareness enabled.
 
 - v1.2 (07 Jul 2025) 
   - Added support for Picture property to set a background image. PictureStretch property sets whether it's stretched to fill the label. If not, you can set an x/y offset with PictureOffsetX/Y.
