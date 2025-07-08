@@ -1,4 +1,4 @@
-[Description("Color Font Label Control v1.2")]
+[Description("Color Font Label Control v1.3")]
 [FormDesignerId("95B0B2E5-5DAB-4961-B40E-FB8A132A8600")]
 [ClassId("B3F85F82-99CE-450A-818B-05A042F4F99F")]
 [InterfaceId("B4FCE572-7E21-4A0E-870F-8DA559DF3871")]
@@ -15,7 +15,7 @@ Private Const dbg_MinLevel As Long = 0&   'Only log to immediate/file messages >
 Private Const dbg_RaiseEvent As Boolean = True
 
 '*********************************************************************************************
-'Color Font Label Control v1.2
+'Color Font Label Control v1.3
 'by Jon Johnson
 '(c) 2025, Details: LICENSE.md: Licensed for non-commercial use only under the
 'Creative Commons Attribution-NonCommercial 4.0 International license.
@@ -81,6 +81,9 @@ Private Const dbg_RaiseEvent As Boolean = True
 '
 ' **Changelog**
 '
+'- v1.3 (07 Jul 2025) 
+'   - Bug fix: Font was smaller than regular label with same font/size.
+'   - Bug fix: PictureStretch size wrong when DPI awareness enabled.
 '- v1.2 (07 Jul 2025) 
 '   - Added support for Picture property to set a background image. PictureStretch
 '      property sets whether it's stretched to fill the label. If not, you can set
@@ -883,7 +886,7 @@ Private Function OnRender() As Long
             picRECT.Right = tSz.width: picRECT.Bottom = tSz.Height
             If mStretchBk Then
                 dstRC.Left = mBkX: dstRC.Top = mBkY
-                dstRC.Right = rc.Right + mBkX: dstRC.Bottom = rc.Bottom + mBkY
+                dstRC.Right = (rc.Right / m_ScaleX) + mBkX: dstRC.Bottom = (rc.Bottom / m_ScaleY) + mBkY
             Else
                 dstRC = picRECT
             End If
@@ -908,7 +911,7 @@ Private Function OnRender() As Long
                                             If(mUseBR, DWRITE_FONT_WEIGHT_REGULAR, fw), _
                                             If(mUseIR, DWRITE_FONT_STYLE_NORMAL, fs), _
                                             If(mUseSR, DWRITE_FONT_STRETCH_NORMAL, CType(Of DWRITE_FONT_STRETCH)(mStretch)), _
-                                            PropFont.Size, _
+                                            ConvertPointSizeToDIP(PropFont.Size), _
                                             StrPtr(mLocale))
             hr = Err.LastHresult
             If (SUCCEEDED(hr)) And ((TextFormat Is Nothing) = False) Then
@@ -1024,6 +1027,12 @@ Public Function DCast1(Of T, T2)(v As T2) As T
 End Function
 '--
  
+ 
+Private Function ConvertPointSizeToDIP(ByVal points As Single) As Single
+    Dim dpiY As Single = 96 'd2d scales this itself when dpi aware is on.
+    Return (points / 72.0) * dpiY
+End Function
+
 Private Function Point2F( _
                 ByVal fX As Single, _
                 ByVal fY As Single) As D2D1_POINT_2F
