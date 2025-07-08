@@ -68,8 +68,6 @@ There's some size issues on high DPI displays, but since there's a lot fewer pro
 
 ### Known Issues
 
-- In Design Mode in the twinBASIC IDE, at the time of writing there's a bug where often, but not always, it will show as a black box. This does not affect runtime.
-- When running from the twinBASIC IDE, you may see 'continuable exceptions'. These can be ignored.
 - In Excel VBA 64bit, and likely other VBA hosts, it does not render in Design Mode.
 - Alignment besides left align may interact poorly with TextAngle values besides 0.
 
