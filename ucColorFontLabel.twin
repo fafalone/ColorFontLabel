@@ -1,4 +1,4 @@
-[Description("Color Font Label Control v1.3")]
+[Description("Color Font Label Control v1.4")]
 [FormDesignerId("95B0B2E5-5DAB-4961-B40E-FB8A132A8600")]
 [ClassId("B3F85F82-99CE-450A-818B-05A042F4F99F")]
 [InterfaceId("B4FCE572-7E21-4A0E-870F-8DA559DF3871")]
@@ -6,7 +6,7 @@
 [COMControl]
 Class ucColorFontLabel
 Option Explicit
-Private Const dbg_PrintToImmediate As Boolean = True 'This control has very extensive debug information, you may not want
+Private Const dbg_PrintToImmediate As Boolean = False 'This control has very extensive debug information, you may not want
                                                       'to see that in your IDE.
 Private Const dbg_IncludeDate As Boolean = True 'Prefix all Debug output with the date and time, [yyyy-mm-dd Hh:Mm:Ss]
 Private Const dbg_IncludeName As Boolean = False 'Include Ambient.Name
@@ -15,7 +15,7 @@ Private Const dbg_MinLevel As Long = 0&   'Only log to immediate/file messages >
 Private Const dbg_RaiseEvent As Boolean = True
 
 '*********************************************************************************************
-'Color Font Label Control v1.3
+'Color Font Label Control v1.4
 'by Jon Johnson
 '(c) 2025, Details: LICENSE.md: Licensed for non-commercial use only under the
 'Creative Commons Attribution-NonCommercial 4.0 International license.
@@ -80,6 +80,21 @@ Private Const dbg_RaiseEvent As Boolean = True
 '  (WinDevLib), version 9.1.566 or higher, is required.
 '
 ' **Changelog**
+'
+'- v1.4 (23 Jul 2025)
+'   Thanks to GitHub user 11EJDE11 who created a fork and added these nice changes and
+'   fixes. Could have just submitted a PR :)
+'
+'   - Added support for multiple font effect ranges. You can now use AddUnderlineRange,
+'      AddBoldRange, AddItalicRange, AddStrikethruRange, and AddStretchRange to add
+'      additional ranges. The original range methods are still available; calling these
+'      will reset the list of ranges for that effect and insert the new one as the first.
+'      ClearBoldRanges etc is also available to clear and disable effects.
+'      Note: If you've specified more than one range, the StdFont property for that effect
+'            will be ignored and the effects applied.
+'   - Bug fix: BorderStyle used Boolean instead of ControlBorderStyleConstants.
+'              Note: May still not work depending on twinBASIC version.
+'   - Bug fix: SetCustomTransformMatrix arguments improperly translated.
 '
 '- v1.3 (07 Jul 2025) 
 '   - Bug fix: Font was smaller than regular label with same font/size.
@@ -227,20 +242,20 @@ Private Const mDefAngle As Long = 0 'degrees
 Private mRTL As Boolean
 Private Const mDefRTL As Boolean = False
 
-Private mULRange As DWRITE_TEXT_RANGE
-Private mUseULR As Boolean
+Private mULRanges() As DWRITE_TEXT_RANGE
+Private mULRangeCount As Long
 
-Private mBRange As DWRITE_TEXT_RANGE
-Private mUseBR As Boolean
+Private mBRanges() As DWRITE_TEXT_RANGE
+Private mBRangeCount As Long
 
-Private mSTRange As DWRITE_TEXT_RANGE
-Private mUseSTR As Boolean
+Private mSTRanges() As DWRITE_TEXT_RANGE
+Private mSTRangeCount As Long
 
-Private mIRange As DWRITE_TEXT_RANGE
-Private mUseIR As Boolean
-
-Private mSRange As DWRITE_TEXT_RANGE
-Private mUseSR As Boolean
+Private mIRanges() As DWRITE_TEXT_RANGE
+Private mIRangeCount As Long
+ 
+Private mSRanges() As DWRITE_TEXT_RANGE
+Private mSRangeCount As Long
 
 Private mBorder As ControlBorderStyleConstants
 Private Const mDefBorder As Long = vbFixedSingleBorder
@@ -431,9 +446,9 @@ End Sub
 #End Region
 
 #Region "Properties"
-Public Property Get BorderStyle() As Boolean: Return mBorder: End Property
+Public Property Get BorderStyle() As ControlBorderStyleConstants: Return mBorder: End Property
 [Description("Sets the bordr style of the control.")]
-Public Property Let BorderStyle(ByVal value As Boolean)
+Public Property Let BorderStyle(ByVal value As ControlBorderStyleConstants)
     If mBorder <> value Then
         mBorder = value
         UserControl.BorderStyle = mBorder
@@ -530,8 +545,8 @@ Public Sub SetCustomTransformMatrix(ByVal m11 As Single, _
     mUseCustMX = True
     With mCustMX
         .m_11 = m11: .m_12 = m12
-        .m_21 = m11: .m_22 = m12
-        .m_31 = m11: .m_32 = m12
+        .m_21 = m21: .m_22 = m22
+        .m_31 = m31: .m_32 = m32
     End With
 End Sub
 [Description("Turns off the custom transform matrix. If TextAngle is set, it will take effect again.")]
@@ -580,14 +595,14 @@ Attribute Picture.VB_Description = "Stretch the picture to fit the entire backgr
 Public Property Let PictureStretch(ByVal value As Boolean)
     mStretchBk = value
 End Property
-Public Property Get PictureOffsetX() As Boolean:   PictureOffsetX = mBkX: End Property
+Public Property Get PictureOffsetX() As Long:   PictureOffsetX = mBkX: End Property
 Attribute Picture.VB_Description = "Offset the coordinates of the picture. Ignored if PictureStretch is True."
-Public Property Let PictureOffsetX(ByVal value As Boolean)
+Public Property Let PictureOffsetX(ByVal value As Long)
     mBkX = value
 End Property
-Public Property Get PictureOffsetY() As Boolean:   PictureOffsetY = mBkY: End Property
+Public Property Get PictureOffsetY() As Long:   PictureOffsetY = mBkY: End Property
 Attribute Picture.VB_Description = "Offset the coordinates of the picture. Ignored if PictureStretch is True."
-Public Property Let PictureOffsetY(ByVal value As Boolean)
+Public Property Let PictureOffsetY(ByVal value As Long)
     mBkY = value
 End Property
 
@@ -632,37 +647,111 @@ End Function
 
 [Description("When enabled, limit Underline effect to the specified range when it is applied.")]
 Public Sub UnderlineRange(ByVal bEnable As Boolean, Optional ByVal startPosition As Long = 0, Optional ByVal Length As Long = -1)
-    mUseULR = bEnable
-    mULRange.startPosition = startPosition
-    mULRange.Length = Length
-    OnRender()
+    If bEnable Then
+        ClearUnderlineRanges()
+        AddUnderlineRange(startPosition, Length)
+    Else
+        ClearUnderlineRanges()
+    End If
 End Sub
 [Description("When enabled, limit Bold effect to the specified range when it is applied.")]
 Public Sub BoldRange(ByVal bEnable As Boolean, Optional ByVal startPosition As Long = 0, Optional ByVal Length As Long = -1)
-    mUseBR = bEnable
-    mBRange.startPosition = startPosition
-    mBRange.Length = Length
-    OnRender()
+    If bEnable Then
+        ClearBoldRanges()
+        AddBoldRange(startPosition, Length)
+    Else
+        ClearBoldRanges()
+    End If
 End Sub
 [Description("When enabled, limit StrikeThru effect to the specified range when it is applied.")]
 Public Sub StrikeThruRange(ByVal bEnable As Boolean, Optional ByVal startPosition As Long = 0, Optional ByVal Length As Long = -1)
-    mUseSTR = bEnable
-    mSTRange.startPosition = startPosition
-    mSTRange.Length = Length
-    OnRender()
+    If bEnable Then
+        ClearStrikeThruRanges()
+        AddStrikeThruRange(startPosition, Length)
+    Else
+        ClearStrikeThruRanges()
+    End If
 End Sub
 [Description("When enabled, limit Italic effect to the specified range when it is applied.")]
 Public Sub ItalicizeRange(ByVal bEnable As Boolean, Optional ByVal startPosition As Long = 0, Optional ByVal Length As Long = -1)
-    mUseIR = bEnable
-    mIRange.startPosition = startPosition
-    mIRange.Length = Length
-    OnRender()
+    If bEnable Then
+        ClearItalicRanges()
+        AddItalicRange(startPosition, Length)
+    Else
+        ClearItalicRanges()
+    End If
 End Sub
 [Description("When enabled, limit Stretch effect to the specified range when it is set to other than Normal.")]
-Public Sub StretchRange(ByVal bEnable As Boolean, Optional ByVal startPosition As Long = 0, Optional ByVal Length As Long = -1)
-    mUseSR = bEnable
-    mSRange.startPosition = startPosition
-    mSRange.Length = Length
+Public Sub StretchRange(ByVal bEnable As Boolean, Optional ByVal startPosition As Long = 0, Optional ByVal Length As Long = -1, Optional stretchType As ColorFontLabelTextStretch = CFLTS_None)
+    If bEnable Then
+        ClearStretchRanges()
+        AddStretchRange(startPosition, Length, stretchType)
+    Else
+        ClearStretchRanges()
+    End If
+End Sub
+Public Sub AddUnderlineRange(ByVal startPosition As Long, ByVal Length As Long)
+    mULRangeCount = mULRangeCount + 1
+    ReDim Preserve mULRanges(mULRangeCount - 1)
+    mULRanges(mULRangeCount - 1).startPosition = startPosition
+    mULRanges(mULRangeCount - 1).Length = Length
+    OnRender()
+End Sub
+
+Public Sub ClearUnderlineRanges()
+    mULRangeCount = 0
+    ReDim mULRanges(0)
+    OnRender()
+End Sub
+Public Sub AddBoldRange(ByVal startPosition As Long, ByVal Length As Long)
+    mBRangeCount = mBRangeCount + 1
+    ReDim Preserve mBRanges(mBRangeCount - 1)
+    mBRanges(mBRangeCount - 1).startPosition = startPosition
+    mBRanges(mBRangeCount - 1).Length = Length
+    OnRender()
+End Sub
+Public Sub ClearBoldRanges()
+    mBRangeCount = 0
+    ReDim mBRanges(0)
+    OnRender()
+End Sub
+
+Public Sub AddItalicRange(ByVal startPosition As Long, ByVal Length As Long)
+    mIRangeCount = mIRangeCount + 1
+    ReDim Preserve mIRanges(mIRangeCount - 1)
+    mIRanges(mIRangeCount - 1).startPosition = startPosition
+    mIRanges(mIRangeCount - 1).Length = Length
+    OnRender()
+End Sub
+Public Sub ClearItalicRanges()
+    mIRangeCount = 0
+    ReDim mIRanges(0)
+    OnRender()
+End Sub
+
+Public Sub AddStrikeThruRange(ByVal startPosition As Long, ByVal Length As Long)
+    mSTRangeCount = mSTRangeCount + 1
+    ReDim Preserve mSTRanges(mSTRangeCount - 1)
+    mSTRanges(mSTRangeCount - 1).startPosition = startPosition
+    mSTRanges(mSTRangeCount - 1).Length = Length
+    OnRender()
+End Sub
+Public Sub ClearStrikeThruRanges()
+    mSTRangeCount = 0
+    ReDim mSTRanges(0)
+    OnRender()
+End Sub
+
+Public Sub AddStretchRange(ByVal startPosition As Long, ByVal Length As Long, ByVal stretchValue As ColorFontLabelTextStretch)
+    mSRangeCount = mSRangeCount + 1
+    ReDim Preserve mSRanges(mSRangeCount - 1)
+    mSRanges(mSRangeCount - 1).startPosition = startPosition
+    mSRanges(mSRangeCount - 1).Length = Length
+    OnRender()
+End Sub
+Public Sub ClearStretchRanges()
+    mSRangeCount = 0
+    ReDim mSRanges(0)
     OnRender()
 End Sub
 
@@ -908,9 +997,9 @@ Private Function OnRender() As Long
             Set TextFormat = DWriteFactory.CreateTextFormat( _
                                             StrPtr(PropFont.Name), _
                                             Nothing, _
-                                            If(mUseBR, DWRITE_FONT_WEIGHT_REGULAR, fw), _
-                                            If(mUseIR, DWRITE_FONT_STYLE_NORMAL, fs), _
-                                            If(mUseSR, DWRITE_FONT_STRETCH_NORMAL, CType(Of DWRITE_FONT_STRETCH)(mStretch)), _
+                                            If(mBRangeCount > 0, DWRITE_FONT_WEIGHT_REGULAR, fw), _
+                                            If(mIRangeCount > 0, DWRITE_FONT_STYLE_NORMAL, fs), _
+                                            If(mSRangeCount > 0, DWRITE_FONT_STRETCH_NORMAL, CType(Of DWRITE_FONT_STRETCH)(mStretch)), _
                                             ConvertPointSizeToDIP(PropFont.Size), _
                                             StrPtr(mLocale))
             hr = Err.LastHresult
@@ -925,32 +1014,42 @@ Private Function OnRender() As Long
                                     TextFormat, TextCanvasArea.Right - TextCanvasArea.Left, _
                                     TextCanvasArea.Bottom - TextCanvasArea.Top)
                 
+                Dim ind As Long
                 Dim range As DWRITE_TEXT_RANGE
                 range.Length = -1
-                If mUseULR Then
-                    TextLayout.SetUnderline(If(PropFont.Underline, CTRUE, CFALSE), DCast1(Of LongLong)(mULRange))
-                Else
-                    TextLayout.SetUnderline(If(PropFont.Underline, CTRUE, CFALSE), DCast1(Of LongLong)(range))
+                If mULRangeCount > 0 Then
+                    For ind = 0 To mULRangeCount - 1
+                        TextLayout.SetUnderline(CTRUE, DCast1(Of LongLong)(mULRanges(ind)))
+                    Next
+                ElseIf PropFont.Underline Then
+                    TextLayout.SetUnderline(CTRUE, DCast1(Of LongLong)(range))
                 End If
-                If mUseSTR Then
-                    TextLayout.SetStrikethrough(If(PropFont.Strikethrough, CTRUE, CFALSE), DCast1(Of LongLong)(mSTRange))
-                Else
-                    TextLayout.SetStrikethrough(If(PropFont.Strikethrough, CTRUE, CFALSE), DCast1(Of LongLong)(range))
+                If mSTRangeCount > 0 Then
+                    For ind = 0 To mSTRangeCount - 1
+                        TextLayout.SetStrikethrough(CTRUE, DCast1(Of LongLong)(mSTRanges(ind)))()
+                    Next
+                ElseIf PropFont.Strikethrough Then
+                    TextLayout.SetStrikethrough(CTRUE, DCast1(Of LongLong)(range))()
                 End If
-                If mUseBR Then
-                    If PropFont.Bold Then
-                        TextLayout.SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, DCast1(Of LongLong)(mBRange))
-                    End If
+                If mBRangeCount > 0 Then
+                    For ind = 0 To mBRangeCount - 1
+                        TextLayout.SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, DCast1(Of LongLong)(mBRanges(ind)))
+                    Next
+                ElseIf PropFont.Bold Then
+                    TextLayout.SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, DCast1(Of LongLong)(range))()
                 End If
-                If mUseIR Then
-                    If PropFont.Italic Then
-                        TextLayout.SetFontStyle(DWRITE_FONT_STYLE_ITALIC, DCast1(Of LongLong)(mIRange))
-                    End If
+                If mIRangeCount > 0 Then
+                    For ind = 0 To mIRangeCount - 1
+                        TextLayout.SetFontStyle(DWRITE_FONT_STYLE_ITALIC, DCast1(Of LongLong)(mIRanges(ind)))
+                    Next
+                ElseIf PropFont.Italic Then
+                    TextLayout.SetFontWeight(DWRITE_FONT_STYLE_ITALIC, DCast1(Of LongLong)(range))()
                 End If
-                If mUseSR Then
-                     TextLayout.SetFontStretch(mStretch, DCast1(Of LongLong)(mSRange))
+                If mSRangeCount > 0 Then
+                    For ind = 0 To mSRangeCount - 1
+                        TextLayout.SetFontStretch(mStretch, DCast1(Of LongLong)(mSRanges))
+                    Next
                 End If
-                
                 If mLineSpacing Then
                     TextFormat.SetLineSpacing mSpaceType, mLineSpacing, 0.80
                 End If
@@ -1132,6 +1231,5 @@ Private Function ucWndProc(ByVal hWnd As LongPtr, ByVal uMsg As Long, ByVal wPar
 
     Return DefSubclassProc(hWnd, uMsg, wParam, lParam)
 End Function
-
 
 End Class
