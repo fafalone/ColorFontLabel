@@ -1,4 +1,4 @@
-# 🌈 ColorFontLabel v1.3
+# 🌈 ColorFontLabel v1.4
 Enhanced Label UserControl/ActiveX Control Supporting Color Fonts (i.e. color emojis)
 
 ![image](https://github.com/user-attachments/assets/20f47c40-fc97-4c82-9f68-e3c0e72cb4ed) ![image](https://github.com/user-attachments/assets/1b239fa8-4d44-44eb-9e56-cb1737d2091c)
@@ -13,6 +13,21 @@ For commercial use, contact me at fafalone@gmail.com.
 
 **Updates**
 
+- v1.4 (23 Jul 2025)\
+  Thanks to GitHub user 11EJDE11 who created a fork and added these nice changes and
+  fixes. Could have just submitted a PR :)
+
+  - Added support for multiple font effect ranges. You can now use AddUnderlineRange,
+     AddBoldRange, AddItalicRange, AddStrikethruRange, and AddStretchRange to add
+     additional ranges. The original range methods are still available; calling these
+     will reset the list of ranges for that effect and insert the new one as the first.
+     ClearBoldRanges etc is also available to clear and disable effects.
+     Note: If you've specified more than one range, the StdFont property for that effect
+           will be ignored and the effects applied.
+  - Bug fix: BorderStyle used Boolean instead of ControlBorderStyleConstants.
+             Note: May still not work depending on twinBASIC version.
+  - Bug fix: SetCustomTransformMatrix arguments improperly translated.
+    
 - v1.3 (07 Jul 2025) 
    - Bug fix: Font was smaller than regular label with same font/size.
    - Bug fix: PictureStretch size wrong when DPI awareness enabled.
