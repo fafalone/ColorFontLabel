@@ -24,7 +24,7 @@ For commercial use, contact me at fafalone@gmail.com.
      ClearBoldRanges etc is also available to clear and disable effects.
      Note: If you've specified more than one range, the StdFont property for that effect
            will be ignored and the effects applied.
-  - Bug fix: BorderStyle, PictureOffsetX/Y used Boolean instead of ControlBorderStyleConstants.
+  - Bug fix: BorderStyle, PictureOffsetX/Y used Boolean instead of ControlBorderStyleConstants/Long.
              Note: May still not work depending on twinBASIC version.
   - Bug fix: SetCustomTransformMatrix arguments improperly translated.
     
