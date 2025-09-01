@@ -64,8 +64,10 @@ There's some size issues on high DPI displays, but since there's a lot fewer pro
 
 ![image](https://github.com/user-attachments/assets/4bd528d3-33a4-4acf-946e-a7af8ce1161c)
 
+Works in VB6:\
 ![image](https://github.com/user-attachments/assets/c3ad5dad-8afa-475e-9cd3-e54642a34d6e)
 
+Works in VBA:\
 ![image](https://github.com/user-attachments/assets/2aebfb7f-7b36-4fc3-a7b4-c9c458c545f4)
 
 ### Requirements
