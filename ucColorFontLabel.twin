@@ -416,11 +416,9 @@ Private Sub UserControl_Paint() Handles UserControl.Paint
 End Sub
 
 
-Private Sub IDropTarget_DragEnter(ByVal pDataObject As IDataObject, ByVal grfKeyState As KeyStateMouse, ByVal pt As LongLong, pdwEffect As DROPEFFECTS) Implements IDropTarget.DragEnter
-    Dim ptt As POINT
-    CopyMemory ptt, pt, LenB(ptt)
-    RaiseEvent DragEnterOLE(pDataObject, grfKeyState, ptt, pdwEffect)
-    pDTH.DragEnter UserControl.hWnd, pDataObject, ptt, pdwEffect
+Private Sub IDropTarget_DragEnter(ByVal pDataObject As IDataObject, ByVal grfKeyState As KeyStateMouse, ByVal pt As POINT, pdwEffect As DROPEFFECTS) Implements IDropTarget.DragEnter
+    RaiseEvent DragEnterOLE(pDataObject, grfKeyState, pt, pdwEffect)
+    pDTH.DragEnter UserControl.hWnd, pDataObject, pt, pdwEffect
 End Sub
 
 Private Sub IDropTarget_DragLeave() Implements IDropTarget.DragLeave
@@ -428,19 +426,15 @@ Private Sub IDropTarget_DragLeave() Implements IDropTarget.DragLeave
     pDTH.DragLeave()
 End Sub
 
-Private Sub IDropTarget_DragOver(ByVal grfKeyState As KeyStateMouse, ByVal pt As LongLong, pdwEffect As DROPEFFECTS) Implements IDropTarget.DragOver
-    Dim ptt As POINT
-    CopyMemory ptt, pt, LenB(ptt)
-    RaiseEvent DragOverOLE(grfKeyState, ptt, pdwEffect)
-    pDTH.DragOver ptt, pdwEffect
+Private Sub IDropTarget_DragOver(ByVal grfKeyState As KeyStateMouse, ByVal pt As POINT, pdwEffect As DROPEFFECTS) Implements IDropTarget.DragOver
+    RaiseEvent DragOverOLE(grfKeyState, pt, pdwEffect)
+    pDTH.DragOver pt, pdwEffect
     Err.ReturnHResult = S_OK
 End Sub
 
-Private Sub IDropTarget_Drop(ByVal pDataObj As IDataObject, ByVal grfKeyState As KeyStateMouse, ByVal pt As LongLong, pdwEffect As DROPEFFECTS) Implements IDropTarget.Drop
-    Dim ptt As POINT
-    CopyMemory ptt, pt, LenB(ptt)
-    RaiseEvent DragDropOLE(pDataObj, grfKeyState, ptt, pdwEffect)
-    pDTH.Drop pDataObj, ptt, pdwEffect
+Private Sub IDropTarget_Drop(ByVal pDataObj As IDataObject, ByVal grfKeyState As KeyStateMouse, ByVal pt As POINT, pdwEffect As DROPEFFECTS) Implements IDropTarget.Drop
+    RaiseEvent DragDropOLE(pDataObj, grfKeyState, pt, pdwEffect)
+    pDTH.Drop pDataObj, pt, pdwEffect
 End Sub
 
 #End Region
@@ -786,10 +780,9 @@ End Function
 
 Private Function CreateDeviceResources() As Long
 On Error Resume Next
-Dim hr As Long '= S_OK
+Dim hr As Long = S_OK
 Dim rc As RECT
 If RenderTarget Is Nothing Then
-Debug.Print "initsize", PropFont.Size
     GetClientRect UserControl.hWnd, rc
     Dim size As D2D1_SIZE_U
     Dim rtProps As D2D1_RENDER_TARGET_PROPERTIES
@@ -817,7 +810,6 @@ Debug.Print "initsize", PropFont.Size
         DebugAppend "D2D1CreateFactory::CreateHwndRenderTarget failed, hr=0x" & Hex$(hr)
     End If
     CreateDeviceResources = hr
-    Debug.Print "initsize [DONE]", PropFont.Size
 End If
 Exit Function
 e0:
@@ -845,7 +837,7 @@ Private Function CreateD2DBitmapFromHBITMAP(ByVal hBitmap As LongPtr) As Long
                 hr = pWicFact.CreateBitmapFromSource(pConverter, WICBitmapCacheOnLoad, pWicBmpC)
                 If SUCCEEDED(hr) Then
                     If RenderTarget IsNot Nothing Then
-                        Set BackImage = RenderTarget.CreateBitmapFromWicBitmap(pWicBmpC, vbNullPtr)
+                        Set BackImage = RenderTarget.CreateBitmapFromWicBitmap(pWicBmpC, ByVal vbNullPtr)
                         hr = Err.LastHresult
                     Else
                         hr = E_FAIL
@@ -862,7 +854,7 @@ Private Function CreateTextBrush() As Long
     Set TextBrush = Nothing
     Dim clrF As Long
     OleTranslateColor clrFore, 0, clrF
-    Set TextBrush = RenderTarget.CreateSolidColorBrush(ColorF(clrF), vbNullPtr)
+    Set TextBrush = RenderTarget.CreateSolidColorBrush(ColorF(clrF), ByVal vbNullPtr)
     Return Err.LastHresult
 End Function
 
@@ -891,7 +883,7 @@ Public Sub TextLinearGradientSet(pfStopPositions As Single, plStopColors As Long
     
     Set TextGradientBrush = RenderTarget.CreateLinearGradientBrush( _
                 LinearGradientBrushProperties(Point2F(ptStartX, ptStartY), Point2F(ptEndX, ptEndY)), _
-                vbNullPtr, GradStops)
+                ByVal vbNullPtr, GradStops)
     
     mGradEnable = 1
     OnRender()
@@ -924,7 +916,7 @@ Public Sub TextRadialGradientSet(pfStopPositions As Single, plStopColors As Long
     
     Set TextGradientBrushR = RenderTarget.CreateRadialGradientBrush( _
             RadialGradientBrushProperties(Point2F(ptCenterX, ptCenterY), Point2F(ptgradientOriginOffsetX, ptgradientOriginOffsetY), radiusX, radiusY), _
-            vbNullPtr, GradStops)
+            ByVal vbNullPtr, GradStops)
     
     mGradEnable = 2
     OnRender()
@@ -953,8 +945,9 @@ Private Function OnRender() As Long
     Dim TextLayout As IDWriteTextLayout
     Dim clrWhite As D2D1_COLOR_F
     Dim rc As RECT
+    
     hr = CreateDeviceResources()
-        
+    
     If SUCCEEDED(hr) Then
         GetClientRect UserControl.hWnd, rc
         RenderTarget.BindDC(Me.hDC, rc)
@@ -967,7 +960,7 @@ Private Function OnRender() As Long
         Dim clrb As Long
         OleTranslateColor clrBack, 0, clrb
         RenderTarget.Clear(ColorF(clrb))
-
+        
          If BackImage IsNot Nothing Then
             Dim tSz As D2D1_SIZE_F = BackImage.GetSize()
             Dim picRECT As D2D1_RECT_F
@@ -1003,6 +996,7 @@ Private Function OnRender() As Long
                                             ConvertPointSizeToDIP(PropFont.Size), _
                                             StrPtr(mLocale))
             hr = Err.LastHresult
+            
             If (SUCCEEDED(hr)) And ((TextFormat Is Nothing) = False) Then
                 TextFormat.SetTextAlignment(CType(Of DWRITE_TEXT_ALIGNMENT)(nAlign))
                 TextFormat.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)
@@ -1019,35 +1013,42 @@ Private Function OnRender() As Long
                 range.Length = -1
                 If mULRangeCount > 0 Then
                     For ind = 0 To mULRangeCount - 1
-                        TextLayout.SetUnderline(CTRUE, DCast1(Of LongLong)(mULRanges(ind)))
+                        range = mULRanges(ind)
+                        TextLayout.SetUnderline(CTRUE, range)
                     Next
                 ElseIf PropFont.Underline Then
-                    TextLayout.SetUnderline(CTRUE, DCast1(Of LongLong)(range))
+                    TextLayout.SetUnderline(CTRUE, range)
                 End If
+                
                 If mSTRangeCount > 0 Then
                     For ind = 0 To mSTRangeCount - 1
-                        TextLayout.SetStrikethrough(CTRUE, DCast1(Of LongLong)(mSTRanges(ind)))()
+                        range = mSTRanges(ind)
+                        TextLayout.SetStrikethrough(CTRUE, range)
                     Next
                 ElseIf PropFont.Strikethrough Then
-                    TextLayout.SetStrikethrough(CTRUE, DCast1(Of LongLong)(range))()
+                    TextLayout.SetStrikethrough(CTRUE, range)
                 End If
                 If mBRangeCount > 0 Then
                     For ind = 0 To mBRangeCount - 1
-                        TextLayout.SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, DCast1(Of LongLong)(mBRanges(ind)))
+                        range = mBRanges(ind)
+                        TextLayout.SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range)
                     Next
                 ElseIf PropFont.Bold Then
-                    TextLayout.SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, DCast1(Of LongLong)(range))()
+                    TextLayout.SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range)
                 End If
+                
                 If mIRangeCount > 0 Then
                     For ind = 0 To mIRangeCount - 1
-                        TextLayout.SetFontStyle(DWRITE_FONT_STYLE_ITALIC, DCast1(Of LongLong)(mIRanges(ind)))
+                        range = mIRanges(ind)
+                        TextLayout.SetFontStyle(DWRITE_FONT_STYLE_ITALIC, range)
                     Next
                 ElseIf PropFont.Italic Then
-                    TextLayout.SetFontWeight(DWRITE_FONT_STYLE_ITALIC, DCast1(Of LongLong)(range))()
+                    TextLayout.SetFontWeight(DWRITE_FONT_STYLE_ITALIC, range)
                 End If
                 If mSRangeCount > 0 Then
                     For ind = 0 To mSRangeCount - 1
-                        TextLayout.SetFontStretch(mStretch, DCast1(Of LongLong)(mSRanges))
+                        range = mSRanges(ind)
+                        TextLayout.SetFontStretch(mStretch, range)
                     Next
                 End If
                 If mLineSpacing Then
@@ -1090,14 +1091,15 @@ Private Function OnRender() As Long
                     End If
                 End If
                 
+                Dim pt0 As D2D1_POINT_2F
                 If mGradEnable = 1 Then
-                    RenderTarget.DrawTextLayout 0, TextLayout, TextGradientBrush, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT
+                    RenderTarget.DrawTextLayout pt0, TextLayout, TextGradientBrush, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT
                 ElseIf mGradEnable = 2 Then
-                    RenderTarget.DrawTextLayout 0, TextLayout, TextGradientBrushR, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT
+                    RenderTarget.DrawTextLayout pt0, TextLayout, TextGradientBrushR, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT
                 Else
-                    RenderTarget.DrawTextLayout 0, TextLayout, TextBrush, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT
+                    RenderTarget.DrawTextLayout pt0, TextLayout, TextBrush, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT
                 End If
-  
+                
             End If
         End If
         
@@ -1216,7 +1218,7 @@ Private Function ucWndProc(ByVal hWnd As LongPtr, ByVal uMsg As Long, ByVal wPar
             Exit Function
         
         Case WM_DISPLAYCHANGE
-            InvalidateRect hWnd, vbNullPtr, CFALSE
+            InvalidateRect hWnd, ByVal vbNullPtr, CFALSE
             
             Exit Function
             
